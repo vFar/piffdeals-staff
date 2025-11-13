@@ -1,11 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { ConfigProvider } from 'antd'
+import { ConfigProvider, App as AntdApp } from 'antd'
+import { AuthProvider } from './contexts/AuthContext'
 import './index.css'
 import App from './App.jsx'
-// Import user creation utilities for browser console access
-import './utils/addUserToFirestore.js'
 
 // Ant Design theme configuration
 const theme = {
@@ -36,9 +35,13 @@ const theme = {
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
-      <ConfigProvider theme={theme}>
-        <App />
-      </ConfigProvider>
+      <AuthProvider>
+        <ConfigProvider theme={theme}>
+          <AntdApp>
+            <App />
+          </AntdApp>
+        </ConfigProvider>
+      </AuthProvider>
     </BrowserRouter>
   </StrictMode>,
 )

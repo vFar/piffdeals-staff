@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Add .env to gitignore if not already there
+.env
+.env.local
+.env.*.local

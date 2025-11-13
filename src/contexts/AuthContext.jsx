@@ -1,15 +1,12 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
-import { message } from 'antd';
-import { auth } from '../config/firebase';
-import { getUser, updateLastLogin } from '../services/userService';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { supabase, db } from '../lib/supabase';
 
-const AuthContext = createContext(null);
+const AuthContext = createContext(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+  if (context === undefined) {
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
 };
@@ -19,96 +16,177 @@ export const AuthProvider = ({ children }) => {
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setCurrentUser(user);
+  // Fetch user profile from user_profiles table
+  const fetchUserProfile = useCallback(async (userId) => {
+    if (!userId) {
+      setUserProfile(null);
+      return;
+    }
+
+    try {
+      // Use supabase directly to get better error handling
+      const { data: profile, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+      
+      if (error) {
+        console.error('Error fetching user profile:', error);
+        setUserProfile(null);
+        return;
+      }
+      
+      if (profile) {
+        setUserProfile(profile);
         
-        // Create temporary profile immediately to prevent spinner flicker
-        const createTempProfile = () => ({
-          uid: user.uid,
-          email: user.email || '',
-          displayName: user.displayName || user.email || 'User',
-          role: 'employee',
-          status: 'active',
-          createdAt: null,
-          updatedAt: null,
-          createdBy: null,
-          _isTemporary: true,
-        });
-        
-        // Create and set temporary profile first to allow immediate access
-        const tempProfile = createTempProfile();
-        setUserProfile(tempProfile);
-        // Set loading to false immediately so dashboard can render
-        setLoading(false);
-        
-        // Get user profile from Firestore (async, don't block)
+        // Update last_login timestamp only if profile exists
         try {
-          const profile = await getUser(user.uid);
-          if (profile) {
-            // Check if user is active
-            if (profile.status === 'active') {
-              setUserProfile(profile);
-              // Update last login timestamp (don't wait for it)
-              updateLastLogin(user.uid).catch(err => {
-                console.warn('Failed to update last login:', err);
-              });
-            } else {
-              // User is inactive or suspended
-              console.warn('User account is not active:', user.uid, profile.status);
-              setUserProfile(null);
-              message.error('Jūsu konts nav aktīvs. Lūdzu, sazinieties ar administratoru.');
-              // Sign out inactive users
-              await firebaseSignOut(auth);
-            }
-          } else {
-            // User document doesn't exist in Firestore
-            // Keep the temporary profile we already set
-            console.warn('User profile not found in Firestore for:', user.uid);
-            console.warn('Using temporary profile. Please create a user document in Firestore.');
-            console.warn('See CREATE_USER.md for instructions.');
-          }
-        } catch (error) {
-          // Handle Firestore errors (network issues, blocked requests, etc.)
-          console.error('Error fetching user profile:', error);
-          
-          // Check if it's an offline/blocked error - Firestore might be blocked by ad blocker
-          const isOfflineError = error.code === 'unavailable' || 
-                                 error.code === 'failed-precondition' ||
-                                 error.message?.includes('offline') || 
-                                 error.message?.includes('Failed to get document') ||
-                                 error.message?.includes('network') ||
-                                 error.message?.includes('ERR_BLOCKED_BY_CLIENT');
-          
-          if (isOfflineError) {
-            console.warn('Firestore appears to be offline or blocked. Using temporary profile.');
-            console.warn('If you have an ad blocker, please whitelist this site or disable it for Firestore to work properly.');
-            
-            // Keep the temporary profile we already set
-            // Don't show warning message on every refresh to avoid spam
-          }
-          
-          // Keep the temporary profile we already set
+          await supabase
+            .from('user_profiles')
+            .update({ last_login: new Date().toISOString() })
+            .eq('id', userId);
+        } catch (updateError) {
+          // Silently fail if update fails (not critical)
+          console.warn('Failed to update last_login:', updateError);
         }
       } else {
-        setCurrentUser(null);
+        console.warn('User profile not found for user:', userId);
         setUserProfile(null);
-        setLoading(false);
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      setUserProfile(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Check active sessions and sets the user
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+      if (session?.user) {
+        await fetchUserProfile(session.user.id);
+      }
+      setLoading(false);
+    });
+
+    // Listen for changes on auth state (sign in, sign out, etc.)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event, 'User ID:', session?.user?.id);
+      setCurrentUser(session?.user ?? null);
+      
+      // Set loading to false immediately - don't wait for profile
+      setLoading(false);
+      console.log('Auth loading set to false');
+      
+      // Fetch profile in background (non-blocking)
+      if (session?.user) {
+        // Use setTimeout to make it truly non-blocking
+        setTimeout(() => {
+          fetchUserProfile(session.user.id).catch(err => {
+            console.error('Error fetching profile in auth state change:', err);
+          });
+        }, 0);
+      } else {
+        setUserProfile(null);
       }
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => subscription.unsubscribe();
+  }, [fetchUserProfile]);
+
+  /**
+   * Sign in with email and password
+   */
+  const signIn = async (email, password) => {
+    console.log('Signing in with email:', email);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    
+    if (error) {
+      console.error('Sign in error:', error);
+      throw error;
+    }
+    
+    console.log('Sign in successful, user ID:', data.user?.id);
+    
+    // Profile will be fetched by auth state change listener
+    // Don't fetch here to avoid blocking
+    
+    return data;
+  };
+
+  /**
+   * Sign up with email and password
+   */
+  const signUp = async (email, password, metadata = {}) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: metadata,
+      },
+    });
+    
+    if (error) throw error;
+    return data;
+  };
+
+  /**
+   * Sign out
+   */
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    setUserProfile(null);
+  };
+
+  /**
+   * Reset password request
+   */
+  const resetPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    
+    if (error) throw error;
+  };
+
+  /**
+   * Update user password
+   */
+  const updatePassword = async (newPassword) => {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    
+    if (error) throw error;
+  };
+
+  /**
+   * Update user metadata
+   */
+  const updateUserMetadata = async (metadata) => {
+    const { error } = await supabase.auth.updateUser({
+      data: metadata,
+    });
+    
+    if (error) throw error;
+  };
 
   const value = {
     currentUser,
     userProfile,
     loading,
-    // Helper functions
-    isAuthenticated: !!currentUser,
-    userRole: userProfile?.role || null,
-    userStatus: userProfile?.status || null,
+    signIn,
+    signUp,
+    signOut,
+    resetPassword,
+    updatePassword,
+    updateUserMetadata,
+    refreshProfile: () => currentUser && fetchUserProfile(currentUser.id),
   };
 
   return (
@@ -117,4 +195,3 @@ export const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
-

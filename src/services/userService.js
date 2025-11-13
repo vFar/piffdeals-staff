@@ -1,174 +1,83 @@
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  getDocs, 
-  query, 
-  where,
-  serverTimestamp 
-} from 'firebase/firestore';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { db, auth } from '../config/firebase';
-import { USER_STATUS } from '../types/user';
+import { supabase } from '../lib/supabase';
 
 /**
- * Get user document from Firestore
- * @param {string} uid - User ID
- * @returns {Promise<Object|null>} User document or null
+ * Create a new user account
+ * 
+ * NOTE: This function requires Supabase Admin API access.
+ * You have two options:
+ * 
+ * 1. Use Supabase Edge Function (Recommended):
+ *    - Create an edge function at supabase/functions/create-user
+ *    - Use service role key in the edge function
+ *    - Call the edge function from this service
+ * 
+ * 2. Use Supabase Admin Client (Server-side only):
+ *    - Create a backend API endpoint
+ *    - Use service role key to create admin client
+ *    - Call your backend API from this service
+ * 
+ * For now, this function will attempt to use RPC or direct insert,
+ * but auth user creation must be handled server-side.
  */
-export const getUser = async (uid) => {
+export const createUser = async (userData) => {
+  const { email, password, username, role, status } = userData;
+
   try {
-    const userRef = doc(db, 'users', uid);
-    const userSnap = await getDoc(userRef);
+    // Option 1: Call Supabase Edge Function (if available)
+    // Uncomment and update the function URL when you create the edge function
+    /*
+    const { data, error } = await supabase.functions.invoke('create-user', {
+      body: {
+        email,
+        password,
+        username,
+        role,
+        status,
+      },
+    });
     
-    if (userSnap.exists()) {
-      return {
-        uid: userSnap.id,
-        ...userSnap.data(),
-      };
+    if (error) throw error;
+    return data;
+    */
+
+    // Option 2: Call backend API endpoint (if available)
+    // Uncomment and update the API URL when you create the backend endpoint
+    /*
+    const response = await fetch('/api/users/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        password,
+        username,
+        role,
+        status,
+      }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to create user');
     }
     
-    return null;
-  } catch (error) {
-    // Check if it's a network/offline error
-    if (error.code === 'unavailable' || 
-        error.message?.includes('offline') || 
-        error.message?.includes('Failed to get document') ||
-        error.message?.includes('network') ||
-        error.code === 'failed-precondition') {
-      console.warn('Firestore is unavailable (might be blocked or offline):', error.message);
-      // Return null to indicate user document doesn't exist or can't be fetched
-      // This will trigger the temporary profile creation in AuthContext
-      return null;
-    }
-    console.error('Error getting user:', error);
-    throw error;
-  }
-};
+    return await response.json();
+    */
 
-/**
- * Create user document in Firestore
- * @param {string} uid - User ID
- * @param {Object} userData - User data
- * @returns {Promise<void>}
- */
-export const createUserDocument = async (uid, userData) => {
-  try {
-    const userRef = doc(db, 'users', uid);
-    await setDoc(userRef, {
-      ...userData,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    console.error('Error creating user document:', error);
-    throw error;
-  }
-};
-
-/**
- * Update user document in Firestore
- * @param {string} uid - User ID
- * @param {Object} updates - Updates to apply
- * @returns {Promise<void>}
- */
-export const updateUserDocument = async (uid, updates) => {
-  try {
-    const userRef = doc(db, 'users', uid);
-    await updateDoc(userRef, {
-      ...updates,
-      updatedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    console.error('Error updating user document:', error);
-    throw error;
-  }
-};
-
-/**
- * Get all users
- * @returns {Promise<Array>} Array of user documents
- */
-export const getAllUsers = async () => {
-  try {
-    const usersRef = collection(db, 'users');
-    const usersSnap = await getDocs(usersRef);
+    // Option 3: Direct approach (requires admin client setup)
+    // This will only work if you have set up admin client access
+    // For production, use Option 1 or 2 above
     
-    const users = [];
-    usersSnap.forEach((doc) => {
-      users.push({
-        uid: doc.id,
-        ...doc.data(),
-      });
-    });
+    // Create auth user using admin API
+    // Note: supabase.auth.admin is not available in client SDK
+    // You need to use service role key in a server-side function
     
-    return users;
-  } catch (error) {
-    console.error('Error getting all users:', error);
-    throw error;
-  }
-};
-
-/**
- * Get users by role
- * @param {string} role - User role
- * @returns {Promise<Array>} Array of user documents
- */
-export const getUsersByRole = async (role) => {
-  try {
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('role', '==', role));
-    const usersSnap = await getDocs(q);
-    
-    const users = [];
-    usersSnap.forEach((doc) => {
-      users.push({
-        uid: doc.id,
-        ...doc.data(),
-      });
-    });
-    
-    return users;
-  } catch (error) {
-    console.error('Error getting users by role:', error);
-    throw error;
-  }
-};
-
-/**
- * Create a new user (Firebase Auth + Firestore)
- * @param {string} email - User email
- * @param {string} password - User password
- * @param {string} displayName - User display name
- * @param {string} role - User role
- * @param {string} createdBy - UID of user creating this account
- * @returns {Promise<Object>} Created user data
- */
-export const createUser = async (email, password, displayName, role, createdBy) => {
-  try {
-    // Create Firebase Auth user
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-
-    // Update display name in Firebase Auth
-    if (displayName) {
-      await updateProfile(user, { displayName });
-    }
-
-    // Create user document in Firestore
-    await createUserDocument(user.uid, {
-      email,
-      displayName: displayName || '',
-      role,
-      status: USER_STATUS.ACTIVE,
-      createdBy,
-      lastLoginAt: null,
-    });
-
-    // Return user data
-    return await getUser(user.uid);
+    // For now, we'll create the profile only and return an error
+    // indicating that auth user must be created first
+    throw new Error(
+      'Lietotāja izveide prasa servera piekļuvi. Lūdzu, iestatiet Supabase Edge Function vai backend API.'
+    );
   } catch (error) {
     console.error('Error creating user:', error);
     throw error;
@@ -176,67 +85,45 @@ export const createUser = async (email, password, displayName, role, createdBy) 
 };
 
 /**
- * Deactivate user account
- * @param {string} uid - User ID
- * @returns {Promise<void>}
+ * Create user profile (after auth user is created)
+ * This can be called directly from the client
  */
-export const deactivateUser = async (uid) => {
+export const createUserProfile = async (userId, profileData) => {
+  const { email, username, role, status } = profileData;
+
   try {
-    await updateUserDocument(uid, {
-      status: USER_STATUS.INACTIVE,
+    // Try using the database function first
+    const { data, error: rpcError } = await supabase.rpc('create_user_profile', {
+      p_user_id: userId,
+      p_email: email,
+      p_username: username,
+      p_role: role,
+      p_status: status,
     });
+
+    if (!rpcError && data) {
+      return data;
+    }
+
+    // Fallback to direct insert
+    const { data: profile, error: insertError } = await supabase
+      .from('user_profiles')
+      .insert({
+        id: userId,
+        email,
+        username,
+        role,
+        status,
+      })
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+    return profile;
   } catch (error) {
-    console.error('Error deactivating user:', error);
+    console.error('Error creating user profile:', error);
     throw error;
   }
 };
 
-/**
- * Activate user account
- * @param {string} uid - User ID
- * @returns {Promise<void>}
- */
-export const activateUser = async (uid) => {
-  try {
-    await updateUserDocument(uid, {
-      status: USER_STATUS.ACTIVE,
-    });
-  } catch (error) {
-    console.error('Error activating user:', error);
-    throw error;
-  }
-};
-
-/**
- * Update user role
- * @param {string} uid - User ID
- * @param {string} role - New role
- * @returns {Promise<void>}
- */
-export const updateUserRole = async (uid, role) => {
-  try {
-    await updateUserDocument(uid, {
-      role,
-    });
-  } catch (error) {
-    console.error('Error updating user role:', error);
-    throw error;
-  }
-};
-
-/**
- * Update last login timestamp
- * @param {string} uid - User ID
- * @returns {Promise<void>}
- */
-export const updateLastLogin = async (uid) => {
-  try {
-    await updateUserDocument(uid, {
-      lastLoginAt: serverTimestamp(),
-    });
-  } catch (error) {
-    console.error('Error updating last login:', error);
-    // Don't throw error for last login update failures
-  }
-};
 

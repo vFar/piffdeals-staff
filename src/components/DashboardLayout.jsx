@@ -1,87 +1,58 @@
 import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { signOut } from 'firebase/auth';
-import { Layout, Menu, Input, Button, Avatar, Badge, Space, Typography, Divider, Dropdown, Modal } from 'antd';
+import { Layout, Menu, Input, Button, Badge, Dropdown, Modal, message } from 'antd';
 import {
   DashboardOutlined,
-  FileTextOutlined,
-  UserOutlined,
-  BarChartOutlined,
   SettingOutlined,
+  FileTextOutlined,
+  BarChartOutlined,
   SearchOutlined,
   BellOutlined,
-  QuestionCircleOutlined,
-  LogoutOutlined,
-  ProfileOutlined,
+  UserOutlined,
   CustomerServiceOutlined,
+  LogoutOutlined,
+  DownOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
-import { auth } from '../config/firebase';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { canAccessPage } from '../utils/rbac';
-import { USER_ROLES } from '../types/user';
+import { useUserRole } from '../hooks/useUserRole';
 
-const { Sider, Header, Content } = Layout;
-const { Text } = Typography;
+const { Header, Sider, Content } = Layout;
 
 const DashboardLayout = ({ children }) => {
-  const { currentUser, userProfile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [isSupportModalVisible, setIsSupportModalVisible] = useState(false);
+  const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
+  const { currentUser, userProfile, signOut } = useAuth();
+  const { isAdmin } = useUserRole();
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigate('/login');
-    } catch (error) {
-      console.error('Error signing out:', error);
-    }
-  };
-
-  const handleSupportClick = () => {
-    setIsSupportModalVisible(true);
-  };
-
-  const handleSupportModalClose = () => {
-    setIsSupportModalVisible(false);
-  };
-
-  if (!userProfile) {
-    return null;
-  }
-
-  const userRole = userProfile.role;
-  const canAccessUserAccounts = canAccessPage(userRole, 'userAccounts');
-
+  // Build menu items
   const menuItems = [
     {
       key: '/dashboard',
-      icon: <DashboardOutlined />,
-      label: 'Informācijas panelis',
+      icon: <DashboardOutlined style={{ fontSize: '20px' }} />,
+      label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Informācijas panelis</span>,
     },
     {
       key: '/invoices',
-      icon: <FileTextOutlined />,
-      label: 'Rēķini',
+      icon: <FileTextOutlined style={{ fontSize: '20px' }} />,
+      label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Rēķini</span>,
     },
-    ...(canAccessUserAccounts
-      ? [
-          {
-            key: '/user-accounts',
-            icon: <UserOutlined />,
-            label: 'Lietotāju konti',
-          },
-        ]
-      : []),
     {
       key: '/sales-charts',
-      icon: <BarChartOutlined />,
-      label: 'Pārdošanas diagrammas',
+      icon: <BarChartOutlined style={{ fontSize: '20px' }} />,
+      label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Pārdošanas grafiki</span>,
     },
+    // Only show User Accounts to admins
+    ...(isAdmin ? [{
+      key: '/user-accounts',
+      icon: <TeamOutlined style={{ fontSize: '20px' }} />,
+      label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Lietotāju konti</span>,
+    }] : []),
     {
       key: '/settings',
-      icon: <SettingOutlined />,
-      label: 'Iestatījumi',
+      icon: <SettingOutlined style={{ fontSize: '20px' }} />,
+      label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Iestatījumi</span>,
     },
   ];
 
@@ -89,166 +60,260 @@ const DashboardLayout = ({ children }) => {
     navigate(key);
   };
 
+  const handleUserMenuClick = async ({ key }) => {
+    if (key === 'logout') {
+      try {
+        await signOut();
+        message.success('Veiksmīgi atslēdzies');
+        navigate('/login');
+      } catch (error) {
+        console.error('Logout error:', error);
+        message.error('Kļūda atslēdzoties');
+      }
+    } else if (key === 'profile') {
+      console.log('Navigate to profile');
+    } else if (key === 'support') {
+      setIsSupportModalOpen(true);
+    }
+  };
+
+  // Build user menu items with user info header
+  const getUserMenuItems = () => {
+    const userName = userProfile?.username || currentUser?.email?.split('@')[0] || 'User';
+    const userEmail = userProfile?.email || currentUser?.email || '';
+
+    return [
+      {
+        key: 'user-info-header',
+        disabled: true,
+        label: (
+          <div style={{ padding: '8px 0', minWidth: '200px' }}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#111827', marginBottom: '4px' }}>
+              {userName}
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280' }}>
+              {userEmail}
+            </div>
+          </div>
+        ),
+        style: { cursor: 'default', paddingBottom: '12px', borderBottom: '1px solid #e5e7eb', marginBottom: '8px' },
+      },
+      {
+        key: 'profile',
+        icon: <UserOutlined />,
+        label: 'Profils',
+      },
+      {
+        key: 'support',
+        icon: <CustomerServiceOutlined />,
+        label: 'Atbalsts',
+      },
+      {
+        type: 'divider',
+      },
+      {
+        key: 'logout',
+        icon: <LogoutOutlined />,
+        label: 'Atslēgties',
+        danger: true,
+      },
+    ];
+  };
+
   return (
-    <Layout style={{ minHeight: '100vh', background: '#EBF3FF' }}>
-      <Sider
+    <Layout style={{ minHeight: '100vh', background: '#EBF3FF', overflow: 'visible' }}>
+      {/* Sidebar */}
+      <Sider 
         width={256}
         style={{
-          background: '#fff',
-          borderRight: '1px solid #f0f0f0',
+          overflow: 'auto',
+          height: '100vh',
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          background: '#ffffff',
+          borderRight: '1px solid #e5e7eb',
+          zIndex: 50,
         }}
       >
-        {/* Logo Section */}
-        <div style={{ padding: '24px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Avatar
-            size={40}
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuB6CNz7i8JNvcBCvSm5YApk4rdfbr3vfIIPx3azxylILA_B9u6947WOhdQJEK_VZNYdNIwv3i5fqYCrkfkt3wH4n8gMzON5MujE9tYPMy0obo09C9PT0ZJcpWLn94CDYyHOKLtZct12e5sy_lu-7XsxK6UktXkhLGfb1KnxThjMTs5JEdATcCjbBHLyusQxZS6L6nHu4jJBHAqglIF9mMURFiFDU1KGHJgKUxdnidcvUjnwQqCWMD24-UDx143orgXRkzujG8BMnwRi"
-            style={{ flexShrink: 0 }}
-          />
-        </div>
-
-        {/* Navigation Menu */}
-        <Menu
-          mode="inline"
-          selectedKeys={[location.pathname]}
-          items={menuItems}
-          onClick={handleMenuClick}
-          style={{ borderRight: 0, padding: '16px 0' }}
-        />
-
-        {/* Create Invoice Button */}
-        <div style={{ padding: '16px' }}>
-          <Button
-            type="primary"
-            block
-            style={{ height: '40px', fontWeight: 600 }}
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          {/* Logo Section */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '24px',
+              borderBottom: '1px solid #e5e7eb',
+            }}
           >
-            Izveidot jaunu rēķinu
-          </Button>
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <img 
+                src="/images/S-3.png" 
+                alt="Piffdeals" 
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <img 
+                src="/images/piffdeals_text_primary.svg" 
+                alt="Piffdeals" 
+                style={{ height: '24px', width: 'auto' }}
+              />
+            </div>
+          </div>
+
+          {/* Navigation Menu */}
+          <div style={{ flex: 1, padding: '16px', overflow: 'auto' }}>
+            <Menu
+              mode="inline"
+              selectedKeys={[location.pathname]}
+              items={menuItems}
+              onClick={handleMenuClick}
+              style={{
+                border: 'none',
+                background: 'transparent',
+              }}
+              className="custom-menu"
+            />
+          </div>
+
+          {/* Create Invoice Button */}
+          <div style={{ padding: '16px', marginTop: 'auto' }}>
+            <Button
+              type="primary"
+              block
+              size="large"
+              style={{
+                height: '40px',
+                background: '#0068FF',
+                borderColor: '#0068FF',
+                fontWeight: 700,
+                fontSize: '14px',
+                borderRadius: '8px',
+              }}
+              onClick={() => navigate('/create-invoice')}
+            >
+              Izveidot jaunu rēķinu
+            </Button>
+          </div>
         </div>
       </Sider>
 
-      <Layout>
+      {/* Main Layout */}
+      <Layout style={{ marginLeft: 256, background: '#EBF3FF' }}>
         {/* Header */}
         <Header
           style={{
+            padding: '0 32px',
             background: 'rgba(255, 255, 255, 0.8)',
             backdropFilter: 'blur(8px)',
-            padding: '0 32px',
             display: 'flex',
             alignItems: 'center',
-            gap: '16px',
-            borderBottom: '1px solid #f0f0f0',
+            justifyContent: 'space-between',
             position: 'sticky',
             top: 0,
-            zIndex: 10,
+            zIndex: 1000,
+            borderBottom: '1px solid #e5e7eb',
+            height: '64px',
           }}
         >
-          <Input
-            placeholder="Meklēt..."
-            prefix={<SearchOutlined />}
-            style={{ width: '100%', flex: 1 }}
-          />
-
-          <Space size="middle" style={{ flexShrink: 0 }}>
-            <Badge count={1} size="small">
-              <Button
-                type="text"
-                icon={<BellOutlined />}
-                style={{ fontSize: '20px' }}
-              />
-            </Badge>
-            <Button
-              type="text"
-              icon={<QuestionCircleOutlined />}
-              style={{ fontSize: '20px' }}
+          {/* Search Bar */}
+          <div style={{ width: '100%', maxWidth: '384px' }}>
+            <Input
+              prefix={<SearchOutlined style={{ color: '#6b7280' }} />}
+              placeholder="Meklēt..."
+              size="large"
+              style={{
+                background: '#f3f4f6',
+                border: 'none',
+                borderRadius: '8px',
+              }}
             />
-            <Divider type="vertical" />
+          </div>
+
+          {/* Right Section */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Badge dot offset={[-5, 5]} color="#ef4444">
+                <Button
+                  type="text"
+                  icon={<BellOutlined style={{ fontSize: '20px' }} />}
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    background: '#f3f4f6',
+                    borderRadius: '8px',
+                    color: '#4b5563',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                />
+              </Badge>
+            </div>
+
+            {/* User Info with Dropdown */}
             <Dropdown
               menu={{
-                items: [
-                  {
-                    key: 'profile',
-                    label: 'Profils',
-                    icon: <ProfileOutlined />,
-                  },
-                  {
-                    key: 'support',
-                    label: 'Atbalsts',
-                    icon: <CustomerServiceOutlined />,
-                    onClick: handleSupportClick,
-                  },
-                  {
-                    type: 'divider',
-                  },
-                  {
-                    key: 'logout',
-                    label: 'Iziet',
-                    icon: <LogoutOutlined />,
-                    danger: true,
-                    onClick: handleLogout,
-                  },
-                ],
+                items: getUserMenuItems(),
+                onClick: handleUserMenuClick,
               }}
+              trigger={['hover', 'click']}
               placement="bottomRight"
-              trigger={['click', 'hover']}
+              getPopupContainer={() => document.body}
             >
-              <div
-                style={{
-                  cursor: 'pointer',
-                  padding: '4px 12px',
-                  borderRadius: '4px',
-                  transition: 'background-color 0.2s',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-end',
-                  minWidth: '120px',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#f5f5f5';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }}
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '8px', 
+                cursor: 'pointer',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                transition: 'all 0.2s',
+                background: 'transparent',
+                position: 'relative',
+                zIndex: 1001,
+              }}
+              className="user-dropdown-trigger"
               >
-                <div 
-                  style={{ 
-                    fontSize: '14px', 
-                    fontWeight: 500, 
-                    color: '#262626',
-                    lineHeight: '20px',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    maxWidth: '200px',
-                  }}
-                >
-                  {userProfile.displayName || userProfile.email}
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'flex-end',
+                  gap: '2px'
+                }}>
+                  <div style={{ fontSize: '14px', fontWeight: 500, color: '#111827', lineHeight: '1.2' }}>
+                    {userProfile?.username || currentUser?.email?.split('@')[0] || 'User'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.2' }}>
+                    {userProfile?.email || currentUser?.email || ''}
+                  </div>
                 </div>
-                <div 
-                  style={{ 
-                    fontSize: '12px', 
-                    color: '#8c8c8c', 
-                    lineHeight: '16px',
-                  }}
-                >
-                  {userProfile.role === USER_ROLES.SUPER_ADMIN 
-                    ? 'Super administrators' 
-                    : userProfile.role === USER_ROLES.ADMIN 
-                    ? 'Administrators' 
-                    : 'Darbinieks'}
-                </div>
+                <DownOutlined style={{ fontSize: '12px', color: '#6b7280' }} />
               </div>
             </Dropdown>
-          </Space>
+          </div>
         </Header>
 
-        {/* Main Content */}
+        {/* Content */}
         <Content
           style={{
             padding: '32px',
-            background: '#EBF3FF',
             minHeight: 'calc(100vh - 64px)',
+            position: 'relative',
+            zIndex: 1,
           }}
         >
           {children}
@@ -258,18 +323,66 @@ const DashboardLayout = ({ children }) => {
       {/* Support Modal */}
       <Modal
         title="Atbalsts"
-        open={isSupportModalVisible}
-        onCancel={handleSupportModalClose}
+        open={isSupportModalOpen}
+        onOk={() => setIsSupportModalOpen(false)}
+        onCancel={() => setIsSupportModalOpen(false)}
+        centered
         footer={[
-          <Button key="close" type="primary" onClick={handleSupportModalClose}>
-            Aizvērt
+          <Button key="ok" type="primary" onClick={() => setIsSupportModalOpen(false)}>
+            Sapratu
           </Button>,
         ]}
       >
-        <p>
-          Lai saņemtu atbalstu, lūdzu, sazinieties ar HR vai priekšniecību.
+        <p style={{ fontSize: '16px', lineHeight: '1.6', color: '#4b5563' }}>
+          Lai saņemtu atbalstu, lūdzu, sazinieties ar priekšniecību.
         </p>
       </Modal>
+
+      {/* Custom Menu Styles */}
+      <style>{`
+        .custom-menu .ant-menu-item {
+          height: 40px;
+          line-height: 40px;
+          border-radius: 8px;
+          margin-bottom: 8px;
+          color: #4b5563;
+          transition: all 0.2s;
+        }
+
+        .custom-menu .ant-menu-item:hover {
+          background: #f3f4f6 !important;
+          color: #4b5563;
+        }
+
+        .custom-menu .ant-menu-item-selected {
+          background: rgba(0, 104, 255, 0.1) !important;
+          color: #0068FF !important;
+        }
+
+        .custom-menu .ant-menu-item-selected .ant-menu-item-icon {
+          color: #0068FF !important;
+        }
+
+        .custom-menu .ant-menu-item::after {
+          display: none;
+        }
+
+        .user-dropdown-trigger:hover {
+          background: #f3f4f6 !important;
+        }
+
+        .ant-dropdown {
+          z-index: 10000 !important;
+        }
+
+        .ant-dropdown-menu {
+          z-index: 10000 !important;
+        }
+
+        .ant-dropdown-placement-bottomRight {
+          z-index: 10000 !important;
+        }
+      `}</style>
     </Layout>
   );
 };

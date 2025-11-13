@@ -1,399 +1,525 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Table, Button, Modal, Form, Input, Select, message, Tag, Space, Popconfirm, Spin, Breadcrumb, Typography, Card } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, UserOutlined, HomeOutlined } from '@ant-design/icons';
-import { useAuth } from '../contexts/AuthContext';
-import { canAccessPage, canCreateRole, canManageUser, getCreatableRoles, getRoleDisplayName } from '../utils/rbac';
-import { getAllUsers, createUser, deactivateUser, activateUser, updateUserRole } from '../services/userService';
-import { USER_ROLES, USER_STATUS } from '../types/user';
+import { useState, useEffect } from 'react';
+import { Card, Table, Typography, Breadcrumb, Tag, Space, message, Spin, Modal, Form, Input, Select, Button } from 'antd';
+import { PlusOutlined, MoreOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
+import { supabase } from '../lib/supabase';
+import { useUserRole } from '../hooks/useUserRole';
 
 const { Title, Text } = Typography;
-
 const { Option } = Select;
 
 const UserAccounts = () => {
-  const { userProfile, loading: authLoading } = useAuth();
-  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
+  const [submitting, setSubmitting] = useState(false);
+  const { isAdmin } = useUserRole();
 
   useEffect(() => {
-    if (!authLoading && !userProfile) {
-      navigate('/login');
-      return;
+    if (isAdmin) {
+      fetchUsers();
     }
+  }, [isAdmin]);
 
-    if (userProfile) {
-      const userRole = userProfile.role;
-      if (!canAccessPage(userRole, 'userAccounts')) {
-        navigate('/dashboard');
-        return;
-      }
-      loadUsers();
-    }
-  }, [userProfile, authLoading, navigate]);
-
-  const loadUsers = async () => {
+  const fetchUsers = async () => {
     try {
       setLoading(true);
-      const usersData = await getAllUsers();
-      setUsers(usersData);
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setUsers(data || []);
     } catch (error) {
-      message.error('Neizdevās ielādēt lietotājus');
-      console.error('Error loading users:', error);
+      console.error('Error fetching users:', error);
+      message.error('Kļūda ielādējot lietotājus');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateUser = () => {
-    setEditingUser(null);
-    form.resetFields();
-    setIsModalVisible(true);
-  };
-
-  const handleEditUser = (user) => {
-    setEditingUser(user);
-    form.setFieldsValue({
-      email: user.email,
-      displayName: user.displayName || '',
-      role: user.role,
-    });
-    setIsModalVisible(true);
-  };
-
-  const handleModalCancel = () => {
-    setIsModalVisible(false);
-    setEditingUser(null);
-    form.resetFields();
-  };
-
-  const handleSubmit = async (values) => {
+  // Create user function
+  const handleCreateUser = async (values) => {
     try {
-      if (editingUser) {
-        // Update existing user
-        await updateUserRole(editingUser.uid, values.role);
-        message.success('Lietotājs veiksmīgi atjaunināts');
-      } else {
-        // Create new user
-        const password = values.password || 'TempPassword123!'; // In production, generate a secure password
-        await createUser(
-          values.email,
-          password,
-          values.displayName,
-          values.role,
-          userProfile.uid
+      setSubmitting(true);
+
+      // Try to call Supabase Edge Function first (if available)
+      // Update the function name to match your edge function
+      const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`;
+      
+      let userId = null;
+      
+      try {
+        // Get the current session to pass auth token
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        const response = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({
+            email: values.email,
+            password: values.password,
+            username: values.name,
+            role: values.role,
+            status: values.status,
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          userId = result.userId;
+        } else {
+          throw new Error('Edge function not available or failed');
+        }
+      } catch (edgeError) {
+        // If edge function fails, try alternative approach
+        console.warn('Edge function not available, trying alternative method:', edgeError);
+        
+        // Alternative: Use Supabase Admin API via RPC (requires setup)
+        // This requires a database function that can create auth users
+        // For now, show an error with instructions
+        throw new Error(
+          'Lietotāja izveide prasa servera piekļuvi. ' +
+          'Lūdzu, izveidojiet Supabase Edge Function vai backend API endpoint. ' +
+          'Skatiet dokumentāciju: src/services/userService.js'
         );
-        message.success('Lietotājs veiksmīgi izveidots');
       }
-      handleModalCancel();
-      loadUsers();
+
+      // If we have a userId, create the profile
+      if (userId) {
+        // Create user profile using database function
+        const { error: profileError } = await supabase.rpc('create_user_profile', {
+          p_user_id: userId,
+          p_email: values.email,
+          p_username: values.name,
+          p_role: values.role,
+          p_status: values.status,
+        });
+
+        if (profileError) {
+          // If RPC fails, try direct insert
+          const { error: insertError } = await supabase
+            .from('user_profiles')
+            .insert({
+              id: userId,
+              email: values.email,
+              username: values.name,
+              role: values.role,
+              status: values.status,
+            });
+
+          if (insertError) {
+            console.error('Profile creation error:', insertError);
+            throw insertError;
+          }
+        }
+      }
+
+      message.success('Lietotājs veiksmīgi izveidots');
+      setIsModalOpen(false);
+      form.resetFields();
+      fetchUsers();
     } catch (error) {
-      message.error(error.message || 'Neizdevās saglabāt lietotāju');
-      console.error('Error saving user:', error);
+      console.error('Error creating user:', error);
+      message.error(error.message || 'Kļūda izveidojot lietotāju');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleDeactivate = async (uid) => {
-    try {
-      await deactivateUser(uid);
-      message.success('Lietotājs veiksmīgi deaktivizēts');
-      loadUsers();
-    } catch (error) {
-      message.error('Neizdevās deaktivizēt lietotāju');
-      console.error('Error deactivating user:', error);
-    }
+  // Role display mapping
+  const getRoleLabel = (role) => {
+    const roleMap = {
+      super_admin: { label: 'Galvenais administrators', color: 'red' },
+      admin: { label: 'Administrators', color: 'blue' },
+      employee: { label: 'Darbinieks', color: 'default' },
+    };
+    return roleMap[role] || { label: role, color: 'default' };
   };
 
-  const handleActivate = async (uid) => {
-    try {
-      await activateUser(uid);
-      message.success('Lietotājs veiksmīgi aktivizēts');
-      loadUsers();
-    } catch (error) {
-      message.error('Neizdevās aktivizēt lietotāju');
-      console.error('Error activating user:', error);
-    }
+  // Status display mapping
+  const getStatusLabel = (status) => {
+    const statusMap = {
+      active: { label: 'Aktīvs', color: 'success' },
+      inactive: { label: 'Neaktīvs', color: 'default' },
+      suspended: { label: 'Aizliegts', color: 'error' },
+    };
+    return statusMap[status] || { label: status, color: 'default' };
   };
 
-  if (authLoading || loading) {
-    return (
-      <DashboardLayout>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-          <Spin size="large" tip="Uzgaidiet..." />
-        </div>
-      </DashboardLayout>
-    );
-  }
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('lv-LV', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
-  if (!userProfile) {
-    return null;
-  }
-
-  const userRole = userProfile.role;
-  const creatableRoles = getCreatableRoles(userRole);
-  const canCreate = creatableRoles.length > 0;
+  // Get status badge style
+  const getStatusBadgeStyle = (status) => {
+    const statusStyles = {
+      active: {
+        background: '#dcfce7',
+        color: '#166534',
+        darkBackground: 'rgba(34, 197, 94, 0.1)',
+        darkColor: '#86efac',
+      },
+      inactive: {
+        background: '#f3f4f6',
+        color: '#4b5563',
+        darkBackground: 'rgba(107, 114, 128, 0.1)',
+        darkColor: '#9ca3af',
+      },
+      suspended: {
+        background: '#fee2e2',
+        color: '#991b1b',
+        darkBackground: 'rgba(239, 68, 68, 0.1)',
+        darkColor: '#fca5a5',
+      },
+    };
+    return statusStyles[status] || statusStyles.inactive;
+  };
 
   const columns = [
     {
-      title: 'E-pasts',
+      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Lietotājvārds</span>,
+      dataIndex: 'username',
+      key: 'username',
+      render: (text) => <Text style={{ fontWeight: 500, color: '#111827' }}>{text}</Text>,
+    },
+    {
+      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>E-pasts</span>,
       dataIndex: 'email',
       key: 'email',
-      sorter: (a, b) => a.email.localeCompare(b.email),
+      render: (text) => <Text style={{ color: '#6b7280' }}>{text}</Text>,
     },
     {
-      title: 'Vārds',
-      dataIndex: 'displayName',
-      key: 'displayName',
-      render: (text) => text || '-',
-    },
-    {
-      title: 'Loma',
+      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Loma</span>,
       dataIndex: 'role',
       key: 'role',
       render: (role) => {
-        const roleMap = {
-          [USER_ROLES.EMPLOYEE]: 'Darbinieks',
-          [USER_ROLES.ADMIN]: 'Administrators',
-          [USER_ROLES.SUPER_ADMIN]: 'Super administrators',
-        };
-        return (
-          <Tag color={role === USER_ROLES.SUPER_ADMIN ? 'red' : role === USER_ROLES.ADMIN ? 'blue' : 'default'}>
-            {roleMap[role] || getRoleDisplayName(role)}
-          </Tag>
-        );
+        const roleInfo = getRoleLabel(role);
+        return <Tag color={roleInfo.color}>{roleInfo.label}</Tag>;
       },
-      filters: [
-        { text: 'Darbinieks', value: USER_ROLES.EMPLOYEE },
-        { text: 'Administrators', value: USER_ROLES.ADMIN },
-        { text: 'Super administrators', value: USER_ROLES.SUPER_ADMIN },
-      ],
-      onFilter: (value, record) => record.role === value,
     },
     {
-      title: 'Statuss',
+      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Statuss</span>,
       dataIndex: 'status',
       key: 'status',
       render: (status) => {
-        const statusMap = {
-          [USER_STATUS.ACTIVE]: 'Aktīvs',
-          [USER_STATUS.INACTIVE]: 'Neaktīvs',
-          [USER_STATUS.SUSPENDED]: 'Apturēts',
-        };
+        const statusInfo = getStatusLabel(status);
+        const badgeStyle = getStatusBadgeStyle(status);
         return (
-          <Tag color={status === USER_STATUS.ACTIVE ? 'green' : 'red'}>
-            {statusMap[status] || status?.toUpperCase() || 'NEZINĀMS'}
-          </Tag>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              borderRadius: '9999px',
+              padding: '4px 12px',
+              fontSize: '12px',
+              fontWeight: 500,
+              background: badgeStyle.background,
+              color: badgeStyle.color,
+            }}
+          >
+            {statusInfo.label}
+          </span>
         );
       },
-      filters: [
-        { text: 'Aktīvs', value: USER_STATUS.ACTIVE },
-        { text: 'Neaktīvs', value: USER_STATUS.INACTIVE },
-        { text: 'Apturēts', value: USER_STATUS.SUSPENDED },
-      ],
-      onFilter: (value, record) => record.status === value,
     },
     {
-      title: 'Izveidots',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      render: (timestamp) => {
-        if (!timestamp) return '-';
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-        return date.toLocaleDateString('lv-LV');
-      },
+      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Pēdējā pieteikšanās</span>,
+      dataIndex: 'last_login',
+      key: 'last_login',
+      render: (date) => <Text style={{ color: '#6b7280' }}>{formatDate(date)}</Text>,
     },
     {
-      title: 'Darbības',
+      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Darbības</span>,
       key: 'actions',
-      render: (_, record) => {
-        const canManage = canManageUser(userRole, record.role);
-        const isCurrentUser = record.uid === userProfile.uid;
-        
-        return (
-          <Space size="middle">
-            {canManage && !isCurrentUser && (
-              <>
-                <Button
-                  type="link"
-                  icon={<EditOutlined />}
-                  onClick={() => handleEditUser(record)}
-                  disabled={!canManageUser(userRole, record.role)}
-                >
-                  Rediģēt
-                </Button>
-                {record.status === USER_STATUS.ACTIVE ? (
-                  <Popconfirm
-                    title="Deaktivizēt lietotāju"
-                    description="Vai tiešām vēlaties deaktivizēt šo lietotāju?"
-                    onConfirm={() => handleDeactivate(record.uid)}
-                    okText="Jā"
-                    cancelText="Nē"
-                  >
-                    <Button type="link" danger icon={<DeleteOutlined />}>
-                      Deaktivizēt
-                    </Button>
-                  </Popconfirm>
-                ) : (
-                  <Button
-                    type="link"
-                    onClick={() => handleActivate(record.uid)}
-                  >
-                    Aktivizēt
-                  </Button>
-                )}
-              </>
-            )}
-          </Space>
-        );
-      },
+      render: () => (
+        <Button
+          type="text"
+          icon={<MoreOutlined />}
+          style={{
+            padding: '4px',
+            borderRadius: '50%',
+            width: '32px',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          className="action-button"
+        />
+      ),
     },
   ];
 
   return (
     <DashboardLayout>
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        {/* Breadcrumb */}
-        <Breadcrumb
-          items={[
-            {
-              href: '#',
-              title: <HomeOutlined />,
-            },
-            {
-              title: 'Lietotāju konti',
-            },
-          ]}
-        />
-
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         {/* Page Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
-          <div>
-            <Title level={2} style={{ margin: 0 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
               Lietotāju konti
             </Title>
-            <Text type="secondary">
-              Pārvaldīt lietotāju kontus un atļaujas
+            <Text style={{ fontSize: '16px', color: '#6b7280', lineHeight: '1.5' }}>
+              Pārvaldīt sistēmas lietotājus un to piekļuves lomas
             </Text>
           </div>
-          {canCreate && (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleCreateUser}
-              size="large"
-            >
-              Izveidot lietotāju
-            </Button>
-          )}
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setIsModalOpen(true)}
+            style={{
+              minWidth: '140px',
+              height: '40px',
+              borderRadius: '8px',
+              fontWeight: 700,
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            Pievienot jaunu lietotāju
+          </Button>
         </div>
 
         {/* Users Table */}
-        <Card>
-          <Table
-            columns={columns}
-            dataSource={users}
-            rowKey="uid"
-            loading={loading}
-            pagination={{
-              pageSize: 10,
-              showSizeChanger: true,
-              showTotal: (total) => `Kopā ${total} lietotāji`,
-            }}
-          />
+        <Card
+          bordered={false}
+          style={{
+            borderRadius: '12px',
+            border: '1px solid #e5e7eb',
+            background: '#ffffff',
+            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+          }}
+          bodyStyle={{ padding: 0 }}
+        >
+          {loading ? (
+            <div style={{ padding: '48px', textAlign: 'center' }}>
+              <Spin size="large" />
+            </div>
+          ) : (
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <Table
+                  columns={columns}
+                  dataSource={users.map((user) => ({ ...user, key: user.id }))}
+                  pagination={{
+                    pageSize: 10,
+                    showSizeChanger: true,
+                    showTotal: (total) => `Rāda 1 līdz ${Math.min(10, total)} no ${total} rezultātiem`,
+                    style: {
+                      padding: '16px',
+                      borderTop: '1px solid #e5e7eb',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    },
+                  }}
+                  className="custom-table"
+                  rowClassName="custom-table-row"
+                />
+              </div>
+            </>
+          )}
         </Card>
-      </Space>
+      </div>
 
+      {/* Create User Modal */}
       <Modal
-        title={editingUser ? 'Rediģēt lietotāju' : 'Izveidot lietotāju'}
-        open={isModalVisible}
-        onCancel={handleModalCancel}
+        title={
+          <Title level={3} style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>
+            Pievienot jaunu lietotāju
+          </Title>
+        }
+        open={isModalOpen}
+        onCancel={() => {
+          setIsModalOpen(false);
+          form.resetFields();
+        }}
         footer={null}
+        centered
         width={600}
+        style={{
+          borderRadius: '12px',
+        }}
       >
         <Form
           form={form}
           layout="vertical"
-          onFinish={handleSubmit}
-          initialValues={{
-            role: creatableRoles[0] || USER_ROLES.EMPLOYEE,
-          }}
+          onFinish={handleCreateUser}
+          style={{ marginTop: '24px' }}
         >
           <Form.Item
+            label={<span style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>Vārds</span>}
+            name="name"
+            rules={[{ required: true, message: 'Lūdzu, ievadiet vārdu' }]}
+          >
+            <Input
+              placeholder="Ievadiet lietotāja vārdu"
+              style={{ height: '40px', borderRadius: '8px' }}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label={<span style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>E-pasts</span>}
             name="email"
-            label="E-pasts"
             rules={[
               { required: true, message: 'Lūdzu, ievadiet e-pastu' },
               { type: 'email', message: 'Lūdzu, ievadiet derīgu e-pasta adresi' },
             ]}
           >
             <Input
-              prefix={<UserOutlined />}
+              type="email"
               placeholder="lietotajs@piemers.lv"
-              disabled={!!editingUser}
+              style={{ height: '40px', borderRadius: '8px' }}
             />
           </Form.Item>
 
-          {!editingUser && (
-            <Form.Item
-              name="password"
-              label="Parole"
-              rules={[
-                { required: true, message: 'Lūdzu, ievadiet paroli' },
-                { min: 6, message: 'Parolei jābūt vismaz 6 rakstzīmēm' },
-              ]}
-            >
-              <Input.Password placeholder="Ievadiet paroli" />
-            </Form.Item>
-          )}
-
           <Form.Item
-            name="displayName"
-            label="Vārds"
-            rules={[{ required: true, message: 'Lūdzu, ievadiet vārdu' }]}
+            label={<span style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>Parole</span>}
+            name="password"
+            rules={[
+              { required: true, message: 'Lūdzu, ievadiet paroli' },
+              { min: 8, message: 'Parolei jābūt vismaz 8 simbolu garai' },
+            ]}
           >
-            <Input placeholder="Jānis Bērziņš" />
+            <Input.Password
+              placeholder="Ievadiet paroli"
+              style={{ height: '40px', borderRadius: '8px' }}
+            />
           </Form.Item>
 
           <Form.Item
+            label={<span style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>Loma</span>}
             name="role"
-            label="Loma"
             rules={[{ required: true, message: 'Lūdzu, izvēlieties lomu' }]}
+            initialValue="employee"
           >
-            <Select placeholder="Izvēlieties lomu">
-              {creatableRoles.map((role) => {
-                const roleMap = {
-                  [USER_ROLES.EMPLOYEE]: 'Darbinieks',
-                  [USER_ROLES.ADMIN]: 'Administrators',
-                  [USER_ROLES.SUPER_ADMIN]: 'Super administrators',
-                };
-                return (
-                  <Option key={role} value={role}>
-                    {roleMap[role] || getRoleDisplayName(role)}
-                  </Option>
-                );
-              })}
+            <Select
+              placeholder="Izvēlieties lomu"
+              style={{ height: '40px', borderRadius: '8px' }}
+            >
+              <Option value="employee">Darbinieks</Option>
+              <Option value="admin">Administrators</Option>
+              <Option value="super_admin">Galvenais administrators</Option>
             </Select>
           </Form.Item>
 
-          <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit">
-                {editingUser ? 'Atjaunināt' : 'Izveidot'}
+          <Form.Item
+            label={<span style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>Statuss</span>}
+            name="status"
+            rules={[{ required: true, message: 'Lūdzu, izvēlieties statusu' }]}
+            initialValue="active"
+          >
+            <Select
+              placeholder="Izvēlieties statusu"
+              style={{ height: '40px', borderRadius: '8px' }}
+            >
+              <Option value="active">Aktīvs</Option>
+              <Option value="inactive">Neaktīvs</Option>
+              <Option value="suspended">Aizliegts</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, marginTop: '32px' }}>
+            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button
+                onClick={() => {
+                  setIsModalOpen(false);
+                  form.resetFields();
+                }}
+                style={{ height: '40px', borderRadius: '8px' }}
+              >
+                Atcelt
               </Button>
-              <Button onClick={handleModalCancel}>Atcelt</Button>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={submitting}
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  fontSize: '14px',
+                }}
+              >
+                Izveidot lietotāju
+              </Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* Custom Table Styles */}
+      <style>{`
+        .custom-table .ant-table {
+          font-size: 14px;
+        }
+
+        .custom-table .ant-table-thead > tr > th {
+          background: #f9fafb;
+          border-bottom: 1px solid #e5e7eb;
+          padding: 12px 16px;
+          font-weight: 500;
+        }
+
+        .custom-table .ant-table-tbody > tr > td {
+          border-bottom: 1px solid #e5e7eb;
+          padding: 16px;
+          height: 72px;
+        }
+
+        .custom-table .ant-table-tbody > tr:last-child > td {
+          border-bottom: none;
+        }
+
+        .custom-table .ant-table-tbody > tr {
+          background: #ffffff;
+        }
+
+        .custom-table .ant-table-tbody > tr:hover > td {
+          background: #f9fafb;
+        }
+
+        .custom-table .ant-table-tbody > tr.custom-table-row:hover {
+          background: #f9fafb;
+        }
+
+        .action-button:hover {
+          background: rgba(43, 108, 238, 0.1) !important;
+        }
+
+        .ant-modal-content {
+          border-radius: 12px;
+        }
+
+        .ant-modal-header {
+          border-bottom: 1px solid #e5e7eb;
+          padding: 24px;
+        }
+
+        .ant-modal-body {
+          padding: 24px;
+        }
+      `}</style>
     </DashboardLayout>
   );
 };
 
 export default UserAccounts;
-
 
