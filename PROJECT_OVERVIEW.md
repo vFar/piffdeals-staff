@@ -37,20 +37,27 @@ Staff members use this portal to:
 - ✅ Everything employees can do
 - ✅ View all invoices (not just own)
 - ✅ Edit/Delete any invoice
-- ✅ CRUD operations on user accounts
-- ✅ Create employee accounts
-- ✅ Manage employee profiles
+- ✅ Access User Accounts page
+- ✅ Create **EMPLOYEE** accounts ONLY
+- ✅ Edit employee profiles (username, email, status)
+- ✅ Change employee roles (only to employee)
 - ✅ Suspend/activate employees
+- ✅ Delete employee accounts
 - ✅ View all charts and analytics
-- ❌ Cannot create other admins
-- ❌ Cannot manage other admins
+- ✅ Bulk operations on employees (change status, delete multiple)
+- ❌ Cannot create admin or super_admin accounts
+- ❌ Cannot edit/delete other admins
+- ❌ Cannot see or manage super_admin accounts
 
 ### 👑 **SUPER_ADMIN**
 - ✅ Everything admins can do
-- ✅ Create admin accounts
-- ✅ Manage admin accounts
-- ✅ Delete user accounts
-- ✅ Full system access
+- ✅ Create **ALL** account types (employee, admin, super_admin)
+- ✅ Edit all user profiles (employees, admins, super_admins)
+- ✅ Change any user role
+- ✅ Suspend/activate any user
+- ✅ Delete any user account
+- ✅ Bulk operations on all users
+- ✅ Full unrestricted system access
 
 ## Key Features
 
@@ -76,12 +83,40 @@ Staff members use this portal to:
 - Invoice statistics
 - Product performance
 
-### User Management (Admins Only)
-- Create employee accounts
-- Edit user profiles
-- Change user roles
-- Suspend/activate users
-- View user activity
+### User Management (Admins & Super Admins Only)
+
+**Route Access:**
+- `/user-accounts` - Accessible by ADMIN and SUPER_ADMIN only
+- Employees are blocked from accessing this page (RoleRoute protection)
+
+**User Creation Permissions:**
+- **Admin** can create:
+  - ✅ Employee accounts only
+  - ❌ Cannot create admin or super_admin accounts
+  - Role dropdown shows only "Employee" option for admins
+  
+- **Super Admin** can create:
+  - ✅ Employee accounts
+  - ✅ Admin accounts
+  - ✅ Super Admin accounts
+  - Role dropdown shows all options for super_admins
+
+**User Creation Validation:**
+- Email must be unique (checked before submission)
+- Password must be minimum 8 characters
+- All fields required: name, email, password, role, status
+- Email format validation
+- Real-time error messages for validation failures
+
+**User Management Features:**
+- Search users by name, email, or role (real-time filtering)
+- Select single or multiple users with checkboxes
+- Bulk actions when users selected:
+  - Change role (respects permissions)
+  - Change status (active/inactive/suspended)
+  - Delete selected users
+- Individual user actions (edit, delete, suspend)
+- View user details (username, email, role, status, last login)
 
 ## Authentication & Routes
 

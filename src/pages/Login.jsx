@@ -39,14 +39,14 @@ const Login = () => {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
             console.log('Login succeeded despite timeout, user:', session.user.id);
-            message.success('Veiksmīgi pieteicies!');
+            message.success('Veiksmīgi pieslēdzies!');
             return; // Let useEffect handle navigation
           }
         }
         throw raceError;
       }
       
-      message.success('Veiksmīgi pieteicies!');
+      message.success('Veiksmīgi pieslēdzies!');
       // Navigation will happen via useEffect when currentUser is set
     } catch (error) {
       console.error('Login error:', error);
@@ -68,12 +68,12 @@ const Login = () => {
         
         if (profileData) {
           if (profileData.status === 'suspended') {
-            errorMessage = 'Konts bloķēts. Sazinies ar priekšniecību!';
+            errorMessage = 'Konts bloķēts';
             message.error(errorMessage);
             setLoading(false);
             return;
           } else if (profileData.status === 'inactive') {
-            errorMessage = 'Konts nav aktīvs. Sazinies ar priekšniecību!';
+            errorMessage = 'Konts nav aktīvs, sazinies ar priekšniecību';
             message.error(errorMessage);
             setLoading(false);
             return;

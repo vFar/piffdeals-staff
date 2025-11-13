@@ -50,7 +50,7 @@ const DashboardLayout = ({ children }) => {
       label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Lietotāju konti</span>,
     }] : []),
     {
-      key: '/settings',
+      key: '/profile',
       icon: <SettingOutlined style={{ fontSize: '20px' }} />,
       label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Iestatījumi</span>,
     },
@@ -71,7 +71,7 @@ const DashboardLayout = ({ children }) => {
         message.error('Kļūda atslēdzoties');
       }
     } else if (key === 'profile') {
-      console.log('Navigate to profile');
+      navigate('/profile');
     } else if (key === 'support') {
       setIsSupportModalOpen(true);
     }

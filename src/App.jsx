@@ -4,6 +4,7 @@ import RoleRoute from './components/RoleRoute';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import UserAccounts from './pages/UserAccounts';
+import Profile from './pages/Profile';
 
 function App() {
   return (
@@ -30,6 +31,15 @@ function App() {
             <RoleRoute allowedRoles={['admin', 'super_admin']}>
               <UserAccounts />
             </RoleRoute>
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/profile" 
+        element={
+          <ProtectedRoute>
+            <Profile />
           </ProtectedRoute>
         } 
       />
