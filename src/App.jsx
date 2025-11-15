@@ -5,6 +5,8 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import UserAccounts from './pages/UserAccounts';
 import Profile from './pages/Profile';
+import Invoices from './pages/Invoices';
+import CreateInvoice from './pages/CreateInvoice';
 
 function App() {
   return (
@@ -40,6 +42,24 @@ function App() {
         element={
           <ProtectedRoute>
             <Profile />
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/invoices" 
+        element={
+          <ProtectedRoute>
+            <Invoices />
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/invoices/create" 
+        element={
+          <ProtectedRoute>
+            <CreateInvoice />
           </ProtectedRoute>
         } 
       />

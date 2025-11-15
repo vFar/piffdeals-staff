@@ -16,6 +16,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+// Export URL and key for edge function calls
+supabase.supabaseUrl = supabaseUrl;
+supabase.supabaseKey = supabaseAnonKey;
+
 // Database helper functions for CRUD operations
 export const db = {
   // CREATE - Insert data into a table

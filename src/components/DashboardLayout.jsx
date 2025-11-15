@@ -202,7 +202,7 @@ const DashboardLayout = ({ children }) => {
                 fontSize: '14px',
                 borderRadius: '8px',
               }}
-              onClick={() => navigate('/create-invoice')}
+              onClick={() => navigate('/invoices/create')}
             >
               Izveidot jaunu rēķinu
             </Button>
@@ -229,15 +229,16 @@ const DashboardLayout = ({ children }) => {
           }}
         >
           {/* Search Bar */}
-          <div style={{ width: '100%', maxWidth: '384px' }}>
+          <div style={{ width: '100%', minWidth: '160px', maxWidth: '384px' }}>
             <Input
               prefix={<SearchOutlined style={{ color: '#6b7280' }} />}
               placeholder="Meklēt..."
-              size="large"
               style={{
                 background: '#f3f4f6',
                 border: 'none',
                 borderRadius: '8px',
+                height: '40px',
+                fontSize: '14px',
               }}
             />
           </div>

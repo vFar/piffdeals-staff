@@ -7,9 +7,21 @@ import { supabase } from '../lib/supabase';
 
 const Login = () => {
   const [loading, setLoading] = useState(false);
+  const [form] = Form.useForm();
   const navigate = useNavigate();
   const { signIn, currentUser } = useAuth();
   const { message } = App.useApp();
+
+  // Load remembered email on mount
+  useEffect(() => {
+    const rememberedEmail = localStorage.getItem('rememberedEmail');
+    if (rememberedEmail) {
+      form.setFieldsValue({
+        email: rememberedEmail,
+        remember: true
+      });
+    }
+  }, [form]);
 
   // Navigate to dashboard when user is authenticated
   useEffect(() => {
@@ -23,6 +35,13 @@ const Login = () => {
     setLoading(true);
     try {
       console.log('Attempting login...');
+      
+      // Handle remember me functionality
+      if (values.remember) {
+        localStorage.setItem('rememberedEmail', values.email);
+      } else {
+        localStorage.removeItem('rememberedEmail');
+      }
       
       // Use Promise.race to add a timeout fallback
       const signInPromise = signIn(values.email, values.password);
@@ -180,6 +199,7 @@ const Login = () => {
 
         {/* Login Form */}
         <Form
+          form={form}
           name="login"
           onFinish={onFinish}
           autoComplete="off"

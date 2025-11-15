@@ -182,3 +182,5 @@ If you can't deploy edge functions right now, you can manually create users:
 
 This creates users in both Auth and profiles table manually.
 
+
+

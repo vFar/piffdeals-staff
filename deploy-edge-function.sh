@@ -115,3 +115,5 @@ echo -e "${YELLOW}To view logs:${NC}"
 echo -e "${WHITE}  supabase functions logs create-user --follow${NC}"
 echo ""
 
+
+

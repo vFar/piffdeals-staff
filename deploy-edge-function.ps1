@@ -108,3 +108,5 @@ Write-Host "To view logs:" -ForegroundColor Yellow
 Write-Host "  supabase functions logs create-user --follow" -ForegroundColor White
 Write-Host ""
 
+
+

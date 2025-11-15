@@ -516,18 +516,27 @@ const UserAccounts = () => {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Lietotājvārds</span>,
       dataIndex: 'username',
       key: 'username',
+      sorter: (a, b) => (a.username || '').localeCompare(b.username || ''),
+      sortDirections: ['ascend', 'descend'],
       render: (text) => <Text style={{ fontWeight: 500, color: '#111827' }}>{text}</Text>,
     },
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>E-pasts</span>,
       dataIndex: 'email',
       key: 'email',
+      sorter: (a, b) => (a.email || '').localeCompare(b.email || ''),
+      sortDirections: ['ascend', 'descend'],
       render: (text) => <Text style={{ color: '#6b7280' }}>{text}</Text>,
     },
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Loma</span>,
       dataIndex: 'role',
       key: 'role',
+      sorter: (a, b) => {
+        const roleOrder = { 'super_admin': 3, 'admin': 2, 'employee': 1 };
+        return (roleOrder[a.role] || 0) - (roleOrder[b.role] || 0);
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (role) => {
         const roleInfo = getRoleLabel(role);
         return <Tag color={roleInfo.color}>{roleInfo.label}</Tag>;
@@ -537,6 +546,11 @@ const UserAccounts = () => {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Statuss</span>,
       dataIndex: 'status',
       key: 'status',
+      sorter: (a, b) => {
+        const statusOrder = { 'active': 3, 'inactive': 2, 'suspended': 1 };
+        return (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (status) => {
         const statusInfo = getStatusLabel(status);
         const badgeStyle = getStatusBadgeStyle(status);
@@ -562,6 +576,12 @@ const UserAccounts = () => {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Pēdējā pieslēgšanās</span>,
       dataIndex: 'last_login',
       key: 'last_login',
+      sorter: (a, b) => {
+        const dateA = a.last_login ? new Date(a.last_login).getTime() : 0;
+        const dateB = b.last_login ? new Date(b.last_login).getTime() : 0;
+        return dateA - dateB;
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (date) => <Text style={{ color: '#6b7280' }}>{formatDate(date)}</Text>,
     },
     {
@@ -643,14 +663,14 @@ const UserAccounts = () => {
 
         {/* Search and Bulk Actions Bar */}
         <Card
-          bordered={false}
+          variant="outlined"
           style={{
             borderRadius: '12px',
             border: '1px solid #e5e7eb',
             background: '#ffffff',
             boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
           }}
-          bodyStyle={{ padding: '16px' }}
+          styles={{ body: { padding: '16px' } }}
         >
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
             {/* Search Input */}
@@ -762,14 +782,14 @@ const UserAccounts = () => {
 
         {/* Users Table */}
         <Card
-          bordered={false}
+          variant="outlined"
           style={{
             borderRadius: '12px',
             border: '1px solid #e5e7eb',
             background: '#ffffff',
             boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
           }}
-          bodyStyle={{ padding: 0 }}
+          styles={{ body: { padding: 0 } }}
         >
           {loading ? (
             <div style={{ padding: '48px', textAlign: 'center' }}>
