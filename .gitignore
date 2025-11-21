@@ -26,3 +26,7 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Credential files with Supabase keys
+run_create_users.bat
+run_create_users.sh

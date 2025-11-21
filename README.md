@@ -1,16 +1,63 @@
-# React + Vite
+# Piffdeals Staff Portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Internal staff management system for piffdeals.lv ecommerce shop.
 
-Currently, two official plugins are available:
+## Quick Start
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### Development
 
-## React Compiler
+```bash
+# Install dependencies
+npm install
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+# Start development server
+npm run dev
 
-## Expanding the ESLint configuration
+# Build for production
+npm run build
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# Preview production build
+npm run preview
+```
+
+## Environment Variables
+
+Create a `.env` file in the root directory with the following variables:
+
+```env
+VITE_SUPABASE_URL=your_supabase_project_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_MOZELLO_API_URL=https://api.mozello.com/v1
+VITE_MOZELLO_API_KEY=your_mozello_api_key
+```
+
+## Deployment
+
+### Vercel Deployment
+
+This project is configured for easy deployment to Vercel. See **[VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md)** for detailed deployment instructions.
+
+**Quick Deploy:**
+1. Push your code to a Git repository (GitHub/GitLab/Bitbucket)
+2. Import the project in [Vercel Dashboard](https://vercel.com/dashboard)
+3. Add environment variables in Vercel project settings
+4. Deploy!
+
+The `vercel.json` file is already configured with:
+- ✅ SPA routing support
+- ✅ Security headers
+- ✅ Asset caching
+- ✅ Vite build configuration
+
+## Project Documentation
+
+For detailed project information, see **[PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)**.
+
+## Tech Stack
+
+- **Frontend**: React 19 + Vite
+- **UI Library**: Ant Design
+- **Backend**: Supabase (PostgreSQL + Auth)
+- **Routing**: React Router v7
+- **State Management**: React Context API
+
