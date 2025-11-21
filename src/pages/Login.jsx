@@ -15,7 +15,7 @@ const Login = () => {
   const [blockedUntil, setBlockedUntil] = useState(null);
   const [timeRemaining, setTimeRemaining] = useState(null);
 
-  // Load remembered email on mount and check block status
+  // Load remembered email on mount
   useEffect(() => {
     const rememberedEmail = localStorage.getItem('rememberedEmail');
     if (rememberedEmail) {
@@ -23,47 +23,10 @@ const Login = () => {
         email: rememberedEmail,
         remember: true
       });
-      checkBlockedStatus(rememberedEmail);
     }
   }, [form]);
 
-  // Check if email is blocked
-  const checkBlockedStatus = async (email) => {
-    if (!email) return;
-    
-    try {
-      const { data: isBlockedCheck, error: blockError } = await supabase.rpc('is_email_blocked', {
-        check_email: email.toLowerCase()
-      });
-      
-      if (blockError) {
-        console.error('Error checking block status:', blockError);
-        return;
-      }
-      
-      if (isBlockedCheck) {
-        // Get blocked until time
-        const { data: blockedUntilData, error: blockedError } = await supabase.rpc('get_blocked_until', {
-          check_email: email.toLowerCase()
-        });
-        
-        if (!blockedError && blockedUntilData) {
-          const blockedDate = new Date(blockedUntilData);
-          setIsBlocked(true);
-          setBlockedUntil(blockedDate);
-          updateTimeRemaining(blockedDate);
-        }
-      } else {
-        setIsBlocked(false);
-        setBlockedUntil(null);
-        setTimeRemaining(null);
-      }
-    } catch (error) {
-      console.error('Error checking block status:', error);
-    }
-  };
-
-  // Update time remaining
+  // Update time remaining countdown
   const updateTimeRemaining = (blockedDate) => {
     const now = new Date();
     const diff = blockedDate - now;
@@ -78,31 +41,12 @@ const Login = () => {
     return minutes;
   };
 
-  // Monitor email input changes to check block status
-  const handleEmailChange = (e) => {
-    const email = e.target.value;
-    if (email) {
-      checkBlockedStatus(email);
-    } else {
-      setIsBlocked(false);
-      setBlockedUntil(null);
-      setTimeRemaining(null);
-    }
-  };
-
   // Countdown timer effect
   useEffect(() => {
     if (!isBlocked || !blockedUntil) return;
     
     const interval = setInterval(() => {
-      const remaining = updateTimeRemaining(blockedUntil);
-      if (remaining === null) {
-        // Unblocked, check status again
-        const email = form.getFieldValue('email');
-        if (email) {
-          checkBlockedStatus(email);
-        }
-      }
+      updateTimeRemaining(blockedUntil);
     }, 1000);
     
     return () => clearInterval(interval);
@@ -117,39 +61,6 @@ const Login = () => {
 
   const onFinish = async (values) => {
     const email = values.email.toLowerCase();
-    
-    // Check if blocked before attempting login
-    try {
-      const { data: isBlockedCheck, error: blockError } = await supabase.rpc('is_email_blocked', {
-        check_email: email
-      });
-      
-      if (blockError) {
-        console.error('Error checking block status:', blockError);
-      } else if (isBlockedCheck) {
-        // Get blocked until time for display
-        const { data: blockedUntilData, error: blockedError } = await supabase.rpc('get_blocked_until', {
-          check_email: email
-        });
-        
-        if (!blockedError && blockedUntilData) {
-          const blockedDate = new Date(blockedUntilData);
-          const minutesLeft = Math.ceil((blockedDate - new Date()) / 60000);
-          message.error(`Bloķēts, mēģiniet vēlāk pēc ${minutesLeft} minūtēm!`, 10);
-          setIsBlocked(true);
-          setBlockedUntil(blockedDate);
-          setTimeRemaining(minutesLeft);
-          return;
-        } else {
-          message.error('Bloķēts, mēģiniet vēlāk pēc 15 minūtēm!', 10);
-          setIsBlocked(true);
-          return;
-        }
-      }
-    } catch (error) {
-      console.error('Error checking block status:', error);
-    }
-
     setLoading(true);
     try {
       // Handle remember me functionality
@@ -192,18 +103,10 @@ const Login = () => {
       try {
         await Promise.race([signInPromise, timeoutPromise]);
         
-        // Clear login attempts on successful login
-        try {
-          await supabase.rpc('clear_login_attempts', {
-            check_email: email
-          });
-          setIsBlocked(false);
-          setBlockedUntil(null);
-          setTimeRemaining(null);
-        } catch (clearError) {
-          // Non-critical error
-          console.error('Error clearing login attempts:', clearError);
-        }
+        // Clear block status on successful login
+        setIsBlocked(false);
+        setBlockedUntil(null);
+        setTimeRemaining(null);
         
         // After successful login, verify user status and sign out if inactive/suspended
         const { data: { session } } = await supabase.auth.getSession();
@@ -232,17 +135,10 @@ const Login = () => {
         if (raceError.message === 'Login timeout') {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
-            // Clear attempts on successful login (even if timeout)
-            try {
-              await supabase.rpc('clear_login_attempts', {
-                check_email: email
-              });
-              setIsBlocked(false);
-              setBlockedUntil(null);
-              setTimeRemaining(null);
-            } catch (clearError) {
-              console.error('Error clearing login attempts:', clearError);
-            }
+            // Clear block status on successful login (even if timeout)
+            setIsBlocked(false);
+            setBlockedUntil(null);
+            setTimeRemaining(null);
             
             // Verify status even on timeout
             const { data: profileData } = await supabase
@@ -273,34 +169,31 @@ const Login = () => {
     } catch (error) {
       setLoading(false);
       
-      // Record failed login attempt
-      try {
-        const { data: attemptData, error: attemptError } = await supabase.rpc('record_failed_login', {
-          check_email: email
-        });
+      // Handle blocked error from Edge Function
+      if (error?.status === 429 || error?.message?.includes('Bloķēts')) {
+        const blockedDate = error.blocked_until ? new Date(error.blocked_until) : null;
+        const minutesLeft = error.minutes_remaining || (blockedDate ? Math.ceil((blockedDate - new Date()) / 60000) : 15);
         
-        if (!attemptError && attemptData) {
-          const attempts = attemptData.attempt_count || 0;
-          const isBlockedNow = attemptData.is_blocked || false;
-          
-          if (isBlockedNow && attemptData.blocked_until) {
-            const blockedDate = new Date(attemptData.blocked_until);
-            setIsBlocked(true);
-            setBlockedUntil(blockedDate);
-            const minutesLeft = Math.ceil((blockedDate - new Date()) / 60000);
-            message.error(`Bloķēts, mēģiniet vēlāk pēc ${minutesLeft} minūtēm!`, 10);
-            return;
-          }
+        setIsBlocked(true);
+        if (blockedDate) {
+          setBlockedUntil(blockedDate);
+          setTimeRemaining(minutesLeft);
+        } else {
+          // If we don't have blocked_until, set it to 15 minutes from now
+          const futureDate = new Date(Date.now() + 15 * 60000);
+          setBlockedUntil(futureDate);
+          setTimeRemaining(15);
         }
-      } catch (recordError) {
-        console.error('Error recording failed login:', recordError);
+        
+        message.error(error.message || `Bloķēts, mēģiniet vēlāk pēc ${minutesLeft} minūtēm!`, 10);
+        return;
       }
       
       let errorMessage = 'Nepareizs e-pasts vai parole!';
       const errorMsg = error?.message || '';
       const errorCode = error?.status || error?.code || '';
       
-      // Handle Supabase authentication errors
+      // Handle authentication errors
       if (errorMsg === 'Invalid login credentials' || errorMsg.includes('Invalid login credentials')) {
         errorMessage = 'Nepareizs e-pasts vai parole!';
       } else if (errorCode === 429 || errorMsg.includes('too_many_requests') || errorMsg.includes('Too many requests')) {
@@ -429,7 +322,6 @@ const Login = () => {
           >
             <Input 
               placeholder="Ievadiet lietotājvārdu vai e-pastu"
-              onChange={handleEmailChange}
               disabled={isBlocked}
               style={{
                 height: '44px',

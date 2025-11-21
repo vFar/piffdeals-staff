@@ -44,6 +44,7 @@ const Breadcrumbs = () => {
       dashboard: 'Informācijas panelis',
       invoices: 'Rēķini',
       'invoice-templates': 'Mani paraugi',
+      'sales-charts': 'Pārdošanas grafiki',
       'user-accounts': 'Lietotāju konti',
       'activity-logs': 'Darbību žurnāls',
       profile: 'Iestatījumi',

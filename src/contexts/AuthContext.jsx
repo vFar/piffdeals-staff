@@ -90,22 +90,54 @@ export const AuthProvider = ({ children }) => {
   }, [fetchUserProfile]);
 
   /**
-   * Sign in with email and password
+   * Sign in with email and password (via rate-limited Edge Function)
    */
   const signIn = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    // Get Supabase URL from environment
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    if (!supabaseUrl) {
+      throw new Error('Missing Supabase URL');
+    }
+
+    // Call rate-limited login Edge Function
+    const response = await fetch(`${supabaseUrl}/functions/v1/rate-limited-login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+      },
+      body: JSON.stringify({ email, password }),
     });
-    
-    if (error) {
+
+    const result = await response.json();
+
+    // Handle blocked response
+    if (response.status === 429 || result.error === 'BLOCKED') {
+      const error = new Error(result.message || 'Bloķēts, mēģiniet vēlāk pēc 15 minūtēm!');
+      error.status = 429;
+      error.blocked_until = result.blocked_until;
+      error.minutes_remaining = result.minutes_remaining;
       throw error;
     }
-    
+
+    // Handle other errors
+    if (!response.ok || !result.success) {
+      const error = new Error(result.error || 'Login failed');
+      error.status = response.status;
+      throw error;
+    }
+
+    // Set session manually since we're using Edge Function
+    if (result.session) {
+      await supabase.auth.setSession({
+        access_token: result.session.access_token,
+        refresh_token: result.session.refresh_token,
+      });
+    }
+
     // Profile will be fetched by auth state change listener
-    // Don't fetch here to avoid blocking
-    
-    return data;
+    return { user: result.user, session: result.session };
   };
 
   /**

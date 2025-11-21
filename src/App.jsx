@@ -12,6 +12,7 @@ import ViewInvoice from './pages/ViewInvoice';
 import PublicInvoice from './pages/PublicInvoice';
 import InvoiceTemplates from './pages/InvoiceTemplates';
 import ActivityLogs from './pages/ActivityLogs';
+import SalesCharts from './pages/SalesCharts';
 
 function App() {
   return (
@@ -107,6 +108,15 @@ function App() {
             <RoleRoute allowedRoles={['super_admin']}>
               <ActivityLogs />
             </RoleRoute>
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/sales-charts" 
+        element={
+          <ProtectedRoute>
+            <SalesCharts />
           </ProtectedRoute>
         } 
       />
