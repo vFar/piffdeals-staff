@@ -43,6 +43,21 @@ serve(async (req) => {
       }
     );
 
+    // Extract user ID from auth token to track who created this user
+    const token = authHeader.replace('Bearer ', '');
+    let createdBy = null;
+    
+    try {
+      // Verify the token and get the user using admin client
+      const { data: { user: creatorUser }, error: userError } = await supabaseAdmin.auth.getUser(token);
+      if (!userError && creatorUser) {
+        createdBy = creatorUser.id;
+      }
+    } catch (error) {
+      // If we can't verify the user, continue without created_by
+      console.warn('Could not verify creator user:', error);
+    }
+
     // Parse request body
     const { email, password, username, role, status } = await req.json();
 
@@ -77,7 +92,7 @@ serve(async (req) => {
 
     const userId = authData.user.id;
 
-    // Step 2: Create user profile
+    // Step 2: Create user profile with created_by tracking
     const { error: profileError } = await supabaseAdmin
       .from('user_profiles')
       .insert({
@@ -86,6 +101,7 @@ serve(async (req) => {
         username,
         role,
         status,
+        created_by: createdBy || null,
       });
 
     if (profileError) {

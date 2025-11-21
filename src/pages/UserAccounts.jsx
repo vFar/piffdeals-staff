@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Typography, Breadcrumb, Tag, Space, message, Spin, Modal, Form, Input, Select, Button, Popconfirm, Dropdown } from 'antd';
-import { PlusOutlined, MoreOutlined, SearchOutlined, UserSwitchOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { Card, Table, Typography, Breadcrumb, Tag, Space, message, Spin, Modal, Form, Input, Select, Button, Popconfirm, Dropdown, App } from 'antd';
+import { PlusOutlined, MoreOutlined, SearchOutlined, UserSwitchOutlined, DeleteOutlined, EditOutlined, MailOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
+import { sendPasswordResetEmail } from '../services/userService';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -12,6 +13,7 @@ const UserAccounts = () => {
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true); // Track initial load separately
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
@@ -23,7 +25,9 @@ const UserAccounts = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [editForm] = Form.useForm();
+  const [passwordResetCooldown, setPasswordResetCooldown] = useState(0);
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
+  const { message: messageApi } = App.useApp();
 
   useEffect(() => {
     if (isAdmin || isSuperAdmin) {
@@ -54,7 +58,11 @@ const UserAccounts = () => {
 
   const fetchUsers = async () => {
     try {
-      setLoading(true);
+      // Only show spinner on initial load, not on refreshes
+      if (initialLoad) {
+        setLoading(true);
+      }
+      
       const { data, error } = await supabase
         .from('user_profiles')
         .select('*')
@@ -67,7 +75,10 @@ const UserAccounts = () => {
       console.error('Error fetching users:', error);
       message.error('Kļūda ielādējot lietotājus');
     } finally {
-      setLoading(false);
+      if (initialLoad) {
+        setLoading(false);
+        setInitialLoad(false); // Mark initial load as complete
+      }
     }
   };
 
@@ -282,29 +293,32 @@ const UserAccounts = () => {
   const canEditUser = (targetUser) => {
     if (!userProfile || !targetUser) return false;
 
+    // Prevent users from editing their own account in UserAccounts page
+    // They should use the Profile page instead
+    if (targetUser.id === userProfile.id) {
+      return false;
+    }
+
     // Admins cannot edit users with "aizliegts" (suspended) status
     // Only super_admin can edit suspended users
     if (targetUser.status === 'suspended' && !isSuperAdmin) {
       return false;
     }
 
-    // Employee can only edit their own account
+    // Employee cannot edit any other users
     if (!isAdmin && !isSuperAdmin) {
-      return targetUser.id === userProfile.id;
+      return false;
     }
 
-    // Admin can edit their own account and any employee
+    // Admin can edit any employee
     if (isAdmin && !isSuperAdmin) {
-      return targetUser.id === userProfile.id || targetUser.role === 'employee';
+      return targetUser.role === 'employee';
     }
 
-    // Super admin can edit their own account, all admins, and all employees
+    // Super admin can edit all admins and employees
     // BUT cannot edit other super admins
     if (isSuperAdmin) {
-      if (targetUser.role === 'super_admin') {
-        return targetUser.id === userProfile.id; // Only their own super admin account
-      }
-      return true; // Can edit all admins and employees
+      return targetUser.role !== 'super_admin';
     }
 
     return false;
@@ -320,6 +334,71 @@ const UserAccounts = () => {
       status: user.status,
     });
     setIsEditModalOpen(true);
+  };
+
+  // Handle sending password reset email
+  const handleSendPasswordReset = async () => {
+    if (!editingUser) return;
+
+    try {
+      setSubmitting(true);
+      
+      const result = await sendPasswordResetEmail(editingUser.email, editingUser.username);
+      messageApi.success(`Paroles maiņas e-pasts nosūtīts uz ${editingUser.email}`);
+      
+      // Set cooldown to 10 minutes (600 seconds)
+      setPasswordResetCooldown(600);
+      
+      // Update cooldown every second
+      const cooldownInterval = setInterval(() => {
+        setPasswordResetCooldown((prev) => {
+          if (prev <= 1) {
+            clearInterval(cooldownInterval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } catch (error) {
+      console.error('Error sending password reset email:', error);
+      
+      // Check if it's a cooldown error (429 status)
+      if (error.status === 429 || error.message?.includes('Cooldown') || error.message?.includes('wait')) {
+        // Try to extract cooldown from error message or response
+        let cooldownSeconds = 600; // Default 10 minutes
+        
+        // Try to extract from error message
+        const cooldownMatch = error.message?.match(/(\d+)\s*minute/);
+        if (cooldownMatch) {
+          cooldownSeconds = parseInt(cooldownMatch[1]) * 60;
+        }
+        
+        // Try to extract from error context/body
+        if (error.context?.body?.cooldownRemaining) {
+          cooldownSeconds = error.context.body.cooldownRemaining;
+        }
+        
+        setPasswordResetCooldown(cooldownSeconds);
+        
+        // Update cooldown every second
+        const cooldownInterval = setInterval(() => {
+          setPasswordResetCooldown((prev) => {
+            if (prev <= 1) {
+              clearInterval(cooldownInterval);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+        
+        const minutes = Math.ceil(cooldownSeconds / 60);
+        messageApi.warning(`Lūdzu, uzgaidiet ${minutes} minūte(s) pirms nākamās sūtīšanas`);
+      } else {
+        messageApi.error('Kļūda nosūtot paroles maiņas e-pastu: ' + (error.message || 'Nezināma kļūda'));
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // Handle user edit submission with status change confirmation
@@ -338,16 +417,29 @@ const UserAccounts = () => {
 
       // Role-based permission check for role changes
       if (values.role !== editingUser.role) {
+        const isEditingSelf = editingUser.id === userProfile?.id;
+        
         // Employee can't change roles at all
         if (!isAdmin && !isSuperAdmin) {
           message.error('Jums nav atļaujas mainīt lomas');
           return;
         }
 
-        // Admin can only set role to employee
-        if (isAdmin && !isSuperAdmin && values.role !== 'employee') {
-          message.error('Administrators var piešķirt tikai darbinieka lomu');
-          return;
+        // Allow admins and super_admins to change their own roles
+        if (isEditingSelf) {
+          // Admins can change their own role to employee
+          // Super admins can change their own role to any role
+          if (isAdmin && !isSuperAdmin && values.role !== 'employee') {
+            message.error('Administrators var mainīt savu lomu tikai uz darbinieka lomu');
+            return;
+          }
+          // Super admins can change their own role to any role - no restriction needed
+        } else {
+          // When editing others: Admin can only set role to employee
+          if (isAdmin && !isSuperAdmin && values.role !== 'employee') {
+            message.error('Administrators var piešķirt tikai darbinieka lomu');
+            return;
+          }
         }
       }
 
@@ -1106,6 +1198,40 @@ const UserAccounts = () => {
               <Option value="inactive">Neaktīvs</Option>
               <Option value="suspended">Aizliegts</Option>
             </Select>
+          </Form.Item>
+
+          {/* Password Reset Button */}
+          <Form.Item style={{ marginBottom: '24px', marginTop: '24px' }}>
+            <Button
+              type="default"
+              icon={<MailOutlined />}
+              onClick={handleSendPasswordReset}
+              loading={submitting}
+              disabled={passwordResetCooldown > 0}
+              block
+              style={{
+                height: '40px',
+                borderRadius: '8px',
+                borderColor: '#0068FF',
+                color: '#0068FF',
+                fontWeight: 500,
+                fontSize: '14px',
+              }}
+            >
+              {passwordResetCooldown > 0
+                ? `Lūdzu, uzgaidiet ${Math.ceil(passwordResetCooldown / 60)} min`
+                : 'Nosūtīt paroles maiņas e-pastu'}
+            </Button>
+            {passwordResetCooldown > 0 && (
+              <div style={{ 
+                marginTop: '8px', 
+                fontSize: '12px', 
+                color: '#6b7280',
+                textAlign: 'center'
+              }}>
+                Atkārtota sūtīšana pieejama pēc {Math.ceil(passwordResetCooldown / 60)} minūtēm
+              </div>
+            )}
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, marginTop: '32px' }}>

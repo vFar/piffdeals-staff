@@ -88,7 +88,7 @@ export const createUser = async (userData) => {
  * Create user profile (after auth user is created)
  * This can be called directly from the client
  */
-export const createUserProfile = async (userId, profileData) => {
+export const createUserProfile = async (userId, profileData, createdBy = null) => {
   const { email, username, role, status } = profileData;
 
   try {
@@ -99,6 +99,7 @@ export const createUserProfile = async (userId, profileData) => {
       p_username: username,
       p_role: role,
       p_status: status,
+      p_created_by: createdBy,
     });
 
     if (!rpcError && data) {
@@ -114,6 +115,7 @@ export const createUserProfile = async (userId, profileData) => {
         username,
         role,
         status,
+        created_by: createdBy,
       })
       .select()
       .single();
@@ -122,6 +124,54 @@ export const createUserProfile = async (userId, profileData) => {
     return profile;
   } catch (error) {
     console.error('Error creating user profile:', error);
+    throw error;
+  }
+};
+
+/**
+ * Send password reset email to a user
+ * This function calls the edge function to send a password reset email
+ */
+export const sendPasswordResetEmail = async (userEmail, userName) => {
+  try {
+    // Call the edge function to send password reset email
+    const { data, error } = await supabase.functions.invoke('send-password-reset-email', {
+      body: {
+        userEmail,
+        userName,
+      },
+    });
+
+    if (error) {
+      // Check if it's a cooldown error (429 status)
+      if (error.status === 429) {
+        // Try to parse the error response body for cooldown info
+        let errorData = {};
+        try {
+          if (error.context?.body) {
+            errorData = error.context.body;
+          } else if (error.message) {
+            try {
+              const parsed = JSON.parse(error.message);
+              errorData = parsed;
+            } catch (e) {
+              // Not JSON, use as-is
+            }
+          }
+        } catch (e) {
+          // If parsing fails, use the error message as-is
+        }
+        
+        const customError = new Error(errorData.message || error.message || 'Please wait before sending another email');
+        customError.status = 429;
+        customError.context = { body: errorData };
+        throw customError;
+      }
+      throw error;
+    }
+    return data;
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
     throw error;
   }
 };

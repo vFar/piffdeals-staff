@@ -43,6 +43,31 @@ const Login = () => {
         localStorage.removeItem('rememberedEmail');
       }
       
+      // Check user status BEFORE attempting login
+      try {
+        const { data: profileData } = await supabase
+          .from('user_profiles')
+          .select('status, email')
+          .eq('email', values.email.toLowerCase())
+          .maybeSingle();
+        
+        if (profileData) {
+          if (profileData.status === 'suspended') {
+            message.error('Konts bloķēts. Sazinies ar priekšniecību!');
+            setLoading(false);
+            return;
+          } else if (profileData.status === 'inactive') {
+            message.error('Konts nav aktīvs. Sazinies ar priekšniecību!');
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (profileError) {
+        // If we can't check profile, continue with login attempt
+        // The ProtectedRoute will catch inactive users after login
+        console.warn('Could not check user profile before login:', profileError);
+      }
+      
       // Use Promise.race to add a timeout fallback
       const signInPromise = signIn(values.email, values.password);
       const timeoutPromise = new Promise((_, reject) => 
@@ -52,11 +77,51 @@ const Login = () => {
       try {
         await Promise.race([signInPromise, timeoutPromise]);
         console.log('SignIn completed');
+        
+        // After successful login, verify user status and sign out if inactive/suspended
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: profileData } = await supabase
+            .from('user_profiles')
+            .select('status')
+            .eq('id', session.user.id)
+            .maybeSingle();
+          
+          if (profileData) {
+            if (profileData.status === 'suspended' || profileData.status === 'inactive') {
+              // Sign out immediately if account is not active
+              await supabase.auth.signOut();
+              const statusMsg = profileData.status === 'suspended' 
+                ? 'Konts bloķēts. Sazinies ar priekšniecību!'
+                : 'Konts nav aktīvs. Sazinies ar priekšniecību!';
+              message.error(statusMsg);
+              setLoading(false);
+              return;
+            }
+          }
+        }
       } catch (raceError) {
         // If timeout, check if we're actually authenticated
         if (raceError.message === 'Login timeout') {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
+            // Verify status even on timeout
+            const { data: profileData } = await supabase
+              .from('user_profiles')
+              .select('status')
+              .eq('id', session.user.id)
+              .maybeSingle();
+            
+            if (profileData && (profileData.status === 'suspended' || profileData.status === 'inactive')) {
+              await supabase.auth.signOut();
+              const statusMsg = profileData.status === 'suspended' 
+                ? 'Konts bloķēts. Sazinies ar priekšniecību!'
+                : 'Konts nav aktīvs. Sazinies ar priekšniecību!';
+              message.error(statusMsg);
+              setLoading(false);
+              return;
+            }
+            
             console.log('Login succeeded despite timeout, user:', session.user.id);
             message.success('Veiksmīgi pieslēdzies!');
             return; // Let useEffect handle navigation
@@ -74,34 +139,6 @@ const Login = () => {
       let errorMessage = 'Nepareizs e-pasts vai parole!';
       const errorMsg = error?.message || '';
       const errorCode = error?.status || error?.code || '';
-      
-      // Check for account blocked/suspended status
-      // Try to check user profile even on failed login
-      try {
-        // Try to find user by email in user_profiles
-        const { data: profileData } = await supabase
-          .from('user_profiles')
-          .select('status, email')
-          .eq('email', values.email)
-          .maybeSingle();
-        
-        if (profileData) {
-          if (profileData.status === 'suspended') {
-            errorMessage = 'Konts bloķēts';
-            message.error(errorMessage);
-            setLoading(false);
-            return;
-          } else if (profileData.status === 'inactive') {
-            errorMessage = 'Konts nav aktīvs, sazinies ar priekšniecību';
-            message.error(errorMessage);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch (profileError) {
-        // Silently fail profile check - not critical
-        console.warn('Could not check user profile:', profileError);
-      }
       
       // Handle Supabase authentication errors
       if (errorMsg === 'Invalid login credentials' || errorMsg.includes('Invalid login credentials')) {

@@ -126,14 +126,17 @@ CREATE POLICY "Admins can create profiles"
   TO authenticated
   WITH CHECK (public.is_admin(auth.uid()));
 
--- Policy: Admins can update employee profiles, super_admins can update all
+-- Policy: Admins can update employee profiles and their own profile, super_admins can update all
 CREATE POLICY "Admins can update profiles"
   ON user_profiles FOR UPDATE
   TO authenticated
   USING (
     (
       public.get_user_role(auth.uid()) = 'admin'
-      AND role = 'employee'
+      AND (
+        role = 'employee'
+        OR auth.uid() = id  -- Allow admins to update their own profile regardless of role
+      )
     )
     OR
     public.is_super_admin(auth.uid())
@@ -197,6 +200,19 @@ CREATE TABLE invoices (
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   sent_at TIMESTAMP WITH TIME ZONE,
   
+  -- Public Access
+  public_token UUID UNIQUE DEFAULT NULL, -- UUID for secure public invoice access
+  
+  -- Stripe Payment
+  stripe_payment_link TEXT, -- Stripe Payment Link URL
+  stripe_payment_link_id TEXT, -- Stripe Payment Link ID
+  stripe_payment_intent_id TEXT, -- Stripe Payment Intent ID (after payment)
+  payment_method TEXT, -- Payment method used (stripe, bank_transfer, cash)
+  
+  -- Stock Management
+  stock_update_status TEXT CHECK (stock_update_status IN ('pending', 'completed', 'failed')), -- Mozello stock update status
+  stock_updated_at TIMESTAMP WITH TIME ZONE, -- When stock was updated
+  
   -- Timestamps
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -208,6 +224,10 @@ CREATE INDEX idx_invoices_status ON invoices(status);
 CREATE INDEX idx_invoices_issue_date ON invoices(issue_date DESC);
 CREATE INDEX idx_invoices_invoice_number ON invoices(invoice_number);
 CREATE INDEX idx_invoices_due_date ON invoices(due_date);
+CREATE INDEX idx_invoices_public_token ON invoices(public_token);
+CREATE INDEX idx_invoices_stripe_payment_link_id ON invoices(stripe_payment_link_id);
+CREATE INDEX idx_invoices_stripe_payment_intent_id ON invoices(stripe_payment_intent_id);
+CREATE INDEX idx_invoices_stock_update_status ON invoices(stock_update_status);
 
 -- Enable RLS
 ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
@@ -220,6 +240,16 @@ CREATE POLICY "Users can view invoices"
     user_id = auth.uid()
     OR
     public.is_admin(auth.uid())
+  );
+
+-- Policy: Public can view invoices via public_token (no auth required)
+-- Allows viewing all invoices with public_token except cancelled ones
+CREATE POLICY "Public can view invoices by token"
+  ON invoices FOR SELECT
+  TO anon, authenticated
+  USING (
+    public_token IS NOT NULL
+    AND status != 'cancelled'
   );
 
 -- Policy: All users can create invoices
@@ -242,14 +272,17 @@ CREATE POLICY "Users can update invoices"
     )
   );
 
--- Policy: Users can delete their own draft invoices, admins can delete any
+-- Policy: Only draft invoices can be deleted (by creator or super_admin)
 CREATE POLICY "Users can delete invoices"
   ON invoices FOR DELETE
   TO authenticated
   USING (
-    (user_id = auth.uid() AND status = 'draft')
-    OR
-    public.is_admin(auth.uid())
+    status = 'draft'
+    AND (
+      user_id = auth.uid()
+      OR
+      public.is_super_admin(auth.uid())
+    )
   );
 
 -- Apply updated_at trigger
@@ -299,6 +332,19 @@ CREATE POLICY "Users can view invoice items"
         OR
         public.is_admin(auth.uid())
       )
+    )
+  );
+
+-- Policy: Public can view items from public invoices
+CREATE POLICY "Public can view invoice items by token"
+  ON invoice_items FOR SELECT
+  TO anon, authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM invoices
+      WHERE invoices.id = invoice_items.invoice_id
+      AND invoices.public_token IS NOT NULL
+      AND invoices.status != 'cancelled'
     )
   );
 

@@ -1,22 +1,30 @@
 import { useState, useEffect } from 'react';
-import { Button, Table, message, Modal, Input, Dropdown, Card, Typography, Spin } from 'antd';
-import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Table, message, Modal, Input, Dropdown, Card, Typography, Spin, Tag, App, Popconfirm } from 'antd';
+import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
+import { useNotifications } from '../contexts/NotificationContext';
 
 const { Title, Text } = Typography;
 
 const Invoices = () => {
   const navigate = useNavigate();
+  const { modal } = App.useApp();
   const [invoices, setInvoices] = useState([]);
   const [filteredInvoices, setFilteredInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true); // Track initial load separately
   const [searchText, setSearchText] = useState('');
   const [paymentLinkModal, setPaymentLinkModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [shareMethodModal, setShareMethodModal] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [lastEmailSent, setLastEmailSent] = useState(null);
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
+  const { notifyEmailSendFailed, notifyInvoicePaid } = useNotifications();
 
   useEffect(() => {
     // Only fetch invoices when userProfile is loaded
@@ -68,9 +76,25 @@ const Invoices = () => {
     setFilteredInvoices(filtered);
   }, [searchText, invoices]);
 
+  // Preserve selectedInvoice when invoices list updates (e.g., after fetchInvoices)
+  // This keeps the modal open even when invoices are refreshed
+  useEffect(() => {
+    if (selectedInvoice?.id && invoices.length > 0 && shareMethodModal) {
+      const updatedInvoice = invoices.find(inv => inv.id === selectedInvoice.id);
+      if (updatedInvoice) {
+        // Update selectedInvoice with fresh data to keep modal in sync
+        setSelectedInvoice(updatedInvoice);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, shareMethodModal]);
+
   const fetchInvoices = async () => {
     try {
-      setLoading(true);
+      // Only show spinner on initial load, not on refreshes
+      if (initialLoad) {
+        setLoading(true);
+      }
       
       // Fetch invoices
       let query = supabase
@@ -116,7 +140,10 @@ const Invoices = () => {
       console.error('Error fetching invoices:', error);
       message.error('Neizdevās ielādēt rēķinus');
     } finally {
-      setLoading(false);
+      if (initialLoad) {
+        setLoading(false);
+        setInitialLoad(false); // Mark initial load as complete
+      }
     }
   };
 
@@ -134,17 +161,299 @@ const Invoices = () => {
 
   const handleDeleteInvoice = async (invoiceId) => {
     try {
-      const { error } = await supabase
+      // Find the invoice to verify it's a draft
+      const invoice = invoices.find(inv => inv.id === invoiceId);
+      if (!invoice) {
+        message.error('Rēķins nav atrasts');
+        return;
+      }
+
+      if (invoice.status !== 'draft') {
+        message.error('Var dzēst tikai melnraksta rēķinus');
+        return;
+      }
+
+      // Check permissions
+      const isCreator = invoice.user_id === userProfile?.id;
+      if (!isCreator && !isSuperAdmin) {
+        message.error('Jums nav tiesību dzēst šo rēķinu');
+        return;
+      }
+
+      const { data, error } = await supabase
         .from('invoices')
         .delete()
-        .eq('id', invoiceId);
+        .eq('id', invoiceId)
+        .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Delete error details:', error);
+        throw error;
+      }
+
+      // Check if any rows were actually deleted
+      if (!data || data.length === 0) {
+        console.error('No rows deleted - possible RLS policy issue');
+        message.error('Neizdevās dzēst rēķinu. Pārbaudiet, vai rēķins ir melnraksts un vai jums ir tiesības to dzēst.');
+        return;
+      }
+
       message.success('Rēķins veiksmīgi dzēsts');
       fetchInvoices();
     } catch (error) {
       console.error('Error deleting invoice:', error);
-      message.error('Neizdevās dzēst rēķinu');
+      const errorMessage = error?.message || 'Neizdevās dzēst rēķinu';
+      message.error(errorMessage);
+    }
+  };
+
+  const handleResendInvoice = async (invoice) => {
+    setSelectedInvoice(invoice);
+    setShareMethodModal(true);
+  };
+
+  const handleSendEmailResend = async () => {
+    if (!selectedInvoice?.public_token || !selectedInvoice?.customer_email) {
+      message.error('Nav iespējams nosūtīt e-pastu');
+      return;
+    }
+
+    // Check cooldown (5 minutes = 300000ms)
+    const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+    if (lastEmailSent) {
+      const timeSinceLastEmail = Date.now() - lastEmailSent;
+      if (timeSinceLastEmail < COOLDOWN_MS) {
+        const remainingSeconds = Math.ceil((COOLDOWN_MS - timeSinceLastEmail) / 1000);
+        const remainingMinutes = Math.floor(remainingSeconds / 60);
+        const remainingSecs = remainingSeconds % 60;
+        message.warning(
+          `Lūdzu, uzgaidiet pirms nākamās nosūtīšanas. Atlikušas ${remainingMinutes} min ${remainingSecs} sek.`
+        );
+        return;
+      }
+    }
+
+    // Store invoice ID to preserve reference during updates
+    const invoiceId = selectedInvoice.id;
+    const currentInvoice = { ...selectedInvoice };
+
+    try {
+      setSendingEmail(true);
+      
+      // Get current session for authentication
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      console.log('Session check:', { 
+        hasSession: !!session, 
+        sessionError,
+        accessToken: session?.access_token ? 'Present' : 'Missing'
+      });
+      
+      if (!session) {
+        console.error('No session found. Session error:', sessionError);
+        throw new Error('Nav autentificēts. Lūdzu, pieslēdzieties atkārtoti.');
+      }
+      
+      // Call Supabase Edge Function to send email
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, ''); // Remove trailing slash
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-invoice-email`;
+      
+      console.log('Calling edge function:', edgeFunctionUrl);
+      console.log('Request payload:', {
+        invoiceId: currentInvoice.id,
+        customerEmail: currentInvoice.customer_email,
+        invoiceNumber: currentInvoice.invoice_number
+      });
+      
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          invoiceId: currentInvoice.id,
+          customerEmail: currentInvoice.customer_email,
+          customerName: currentInvoice.customer_name,
+          invoiceNumber: currentInvoice.invoice_number,
+          publicToken: currentInvoice.public_token,
+          total: currentInvoice.total
+        }),
+      });
+
+      console.log('Response status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Error response:', errorData);
+        console.error('Response status:', response.status);
+        throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Update invoice status to 'sent' if it's not already
+      if (currentInvoice.status !== 'sent') {
+        const sentAt = new Date().toISOString();
+        const { error: updateError } = await supabase
+          .from('invoices')
+          .update({ 
+            status: 'sent',
+            sent_at: sentAt
+          })
+          .eq('id', invoiceId);
+        
+        if (updateError) {
+          console.error('Error updating invoice status:', updateError);
+        } else {
+          // Update selectedInvoice to reflect new status without closing modal
+          setSelectedInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
+          // Also update in invoices list to keep data in sync
+          setInvoices(prev => prev.map(inv => 
+            inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
+          ));
+          setFilteredInvoices(prev => prev.map(inv => 
+            inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
+          ));
+        }
+      }
+
+      // Update last email sent time
+      setLastEmailSent(Date.now());
+      
+      if (data?.success) {
+        message.success('E-pasts nosūtīts klientam!');
+      } else {
+        message.warning('E-pasts var nebūt nosūtīts, bet rēķina statuss ir atjaunināts.');
+      }
+      
+      // Keep modal open - don't close it
+    } catch (error) {
+      console.error('Error sending email:', error);
+      const errorMessage = error.message || 'Nezināma kļūda';
+      message.error(`Neizdevās nosūtīt e-pastu: ${errorMessage}`);
+      
+      // Notify via notification system
+      if (selectedInvoice) {
+        notifyEmailSendFailed(selectedInvoice, errorMessage);
+      }
+      
+      // Log full error for debugging
+      console.error('Full error details:', error);
+      
+      // Still update status to 'sent' even if email fails (for resend scenarios)
+      if (currentInvoice.status !== 'sent') {
+        try {
+          const sentAt = new Date().toISOString();
+          const { error: updateError } = await supabase
+            .from('invoices')
+            .update({ 
+              status: 'sent',
+              sent_at: sentAt
+            })
+            .eq('id', invoiceId);
+          
+          if (!updateError) {
+            setSelectedInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
+            // Also update in invoices list to keep data in sync
+            setInvoices(prev => prev.map(inv => 
+              inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
+            ));
+            setFilteredInvoices(prev => prev.map(inv => 
+              inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
+            ));
+          }
+        } catch (statusError) {
+          console.error('Error updating status after email failure:', statusError);
+        }
+      }
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
+  const handleMarkAsPaid = async (invoice) => {
+        try {
+          const { error } = await supabase
+            .from('invoices')
+            .update({ 
+              status: 'paid',
+              paid_date: new Date().toISOString()
+            })
+            .eq('id', invoice.id);
+
+          if (error) throw error;
+          
+          message.success('Rēķins atzīmēts kā apmaksāts!');
+          
+          // Notify via notification system (real-time subscription will also catch this)
+          const updatedInvoice = { ...invoice, status: 'paid', paid_date: new Date().toISOString() };
+          notifyInvoicePaid(updatedInvoice, invoice.payment_method || 'manuāli');
+          
+          fetchInvoices();
+          
+          // TODO: Trigger stock update in Mozello
+          // This should call your edge function to update stock
+        } catch (error) {
+          console.error('Error marking invoice as paid:', error);
+          message.error('Neizdevās atjaunināt rēķinu');
+        }
+  };
+
+  const getPublicInvoiceUrl = (invoice) => {
+    if (!invoice?.public_token) return '';
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/i/${invoice.public_token}`;
+  };
+
+  const handleCopyLinkResend = async () => {
+    const url = getPublicInvoiceUrl(selectedInvoice);
+    if (!url) {
+      message.error('Publiskā saite nav pieejama');
+      return;
+    }
+    
+    // Copy to clipboard with fallback method
+    try {
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        // Ensure document is focused
+        window.focus();
+        await navigator.clipboard.writeText(url);
+      } else {
+        // Fallback for older browsers or when clipboard API fails
+        const textArea = document.createElement('textarea');
+        textArea.value = url;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+          const successful = document.execCommand('copy');
+          if (!successful) {
+            throw new Error('execCommand failed');
+          }
+        } finally {
+          document.body.removeChild(textArea);
+        }
+      }
+      
+      setLinkCopied(true);
+      message.success('Saite nokopēta starpliktuvē!');
+      
+      // Close modal after successful copy
+      setTimeout(() => {
+        setShareMethodModal(false);
+        setSelectedInvoice(null);
+        setLinkCopied(false);
+      }, 500); // Small delay to show the success message
+    } catch (error) {
+      console.error('Error copying to clipboard:', error);
+      message.error('Neizdevās nokopēt saiti. Lūdzu, kopējiet manuāli.');
     }
   };
 
@@ -270,7 +579,31 @@ const Invoices = () => {
       key: 'actions',
       render: (_, record) => {
         const menuItems = [];
+        const isCreator = record.user_id === userProfile?.id;
+        const canEdit = record.status === 'draft' && (isCreator || isSuperAdmin);
+        const canDelete = record.status === 'draft' && (isCreator || isSuperAdmin);
+        const canMarkPaid = ['sent', 'pending', 'overdue'].includes(record.status) && (isCreator || isSuperAdmin);
+        const canCancel = record.status !== 'paid' && (isCreator || isSuperAdmin);
 
+        // Edit action - for draft invoices (creator or super_admin)
+        if (canEdit) {
+          menuItems.push({
+            key: 'edit',
+            icon: <EditOutlined />,
+            label: 'Rediģēt',
+            onClick: () => {
+              console.log('Navigating to edit invoice:', record.invoice_number);
+              // URL encode the invoice number to handle special characters like #
+              const encodedInvoiceNumber = encodeURIComponent(record.invoice_number);
+              const path = `/invoices/edit/${encodedInvoiceNumber}`;
+              console.log('Navigation path:', path);
+              navigate(path);
+            },
+            style: { fontWeight: 600, color: '#0068FF' },
+          });
+        }
+
+        // View payment link - for sent invoices with Stripe link
         if (record.stripe_payment_link && record.status === 'sent') {
           menuItems.push({
             key: 'view-link',
@@ -280,30 +613,80 @@ const Invoices = () => {
           });
         }
 
-        if (record.status === 'draft') {
+        // Resend email - for sent, pending, or overdue invoices (creator or super_admin)
+        if (['sent', 'pending', 'overdue'].includes(record.status) && (isCreator || isSuperAdmin)) {
           menuItems.push({
-            key: 'edit',
-            icon: <EyeOutlined />,
-            label: 'Rediģēt',
-            onClick: () => navigate(`/invoices/edit/${record.id}`),
+            key: 'resend',
+            icon: <MailOutlined />,
+            label: 'Nosūtīt vēlreiz',
+            onClick: () => handleResendInvoice(record),
           });
         }
 
-        menuItems.push({
-          key: 'view',
-          icon: <EyeOutlined />,
-          label: 'Skatīt',
-          onClick: () => navigate(`/invoices/view/${record.id}`),
-        });
+        // Mark as paid - for sent, pending, or overdue invoices (creator or super_admin) with Popconfirm
+        if (canMarkPaid) {
+          menuItems.push({
+            key: 'mark-paid',
+            icon: <CheckOutlined />,
+            label: (
+              <Popconfirm
+                title="Atzīmēt kā apmaksātu?"
+                description={
+                  <div>
+                    <p>Vai apstiprināt, ka rēķins {record.invoice_number} ir apmaksāts?</p>
+                    <p style={{ color: '#6b7280', fontSize: '12px', marginTop: '8px' }}>
+                      Šī darbība atjauninās krājumus Mozello veikalā un iekļaus rēķinu pārdošanas pārskatos.
+                    </p>
+                  </div>
+                }
+                onConfirm={() => handleMarkAsPaid(record)}
+                okText="Apstiprināt"
+                cancelText="Atcelt"
+              >
+                <span>Atzīmēt kā apmaksātu</span>
+              </Popconfirm>
+            ),
+          });
+        }
 
-        if ((isAdmin || isSuperAdmin) || (record.status === 'draft' && record.user_id === userProfile?.id)) {
+        // View invoice - always available
+        // For sent/paid invoices with public token, open public invoice in new tab
+        // For draft invoices, open internal view
+        if (record.public_token && ['sent', 'paid', 'pending', 'overdue'].includes(record.status)) {
+          menuItems.push({
+            key: 'view',
+            icon: <EyeOutlined />,
+            label: 'Skatīt',
+            onClick: () => window.open(`/i/${record.public_token}`, '_blank'),
+          });
+        } else {
+          menuItems.push({
+            key: 'view',
+            icon: <EyeOutlined />,
+            label: 'Skatīt',
+            onClick: () => {
+              console.log('Navigating to invoice:', record.invoice_number);
+              // URL encode the invoice number to handle special characters like #
+              const encodedInvoiceNumber = encodeURIComponent(record.invoice_number);
+              const path = `/invoice/${encodedInvoiceNumber}`;
+              console.log('Navigation path:', path);
+              navigate(path);
+            },
+          });
+        }
+
+        // Delete action - for draft invoices (creator or super_admin)
+        if (canDelete) {
+          if (menuItems.length > 0) {
+            menuItems.push({ type: 'divider' });
+          }
           menuItems.push({
             key: 'delete',
             icon: <DeleteOutlined />,
             label: 'Dzēst',
             danger: true,
             onClick: () => {
-              Modal.confirm({
+              modal.confirm({
                 title: 'Dzēst rēķinu?',
                 content: `Vai tiešām vēlaties dzēst rēķinu ${record.invoice_number}?`,
                 okText: 'Dzēst',
@@ -351,7 +734,7 @@ const Invoices = () => {
               Rēķini
             </Title>
             <Text style={{ fontSize: '16px', color: '#6b7280', lineHeight: '1.5' }}>
-              Pārvaldīt un sekot visiem jūsu rēķiniem
+              Pārvaldīt un sekot visiem rēķiniem
             </Text>
           </div>
           <Button
@@ -431,7 +814,10 @@ const Invoices = () => {
                   },
                 }}
                 className="custom-table"
-                rowClassName="custom-table-row"
+                rowClassName={(record) => {
+                  const isCreator = record.user_id === userProfile?.id;
+                  return record.status === 'draft' && isCreator ? 'custom-table-row draft-row' : 'custom-table-row';
+                }}
               />
             </div>
           )}
@@ -487,8 +873,329 @@ const Invoices = () => {
           />
           <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: 0 }}>
             Kad klients veiks maksājumu, rēķina statuss automātiski 
-            mainīsies uz "Apmaksāts" un krājumi tiks atjaunināti jūsu Mozello veikalā.
+            mainīsies uz "Apmaksāts" un krājumi tiks atjaunināti Mozello e-veikalā.
           </p>
+        </div>
+      </Modal>
+
+      {/* Share Method Modal for Resend */}
+      <style>{`
+        .share-modal-button {
+          width: 100% !important;
+        }
+        @media (min-width: 640px) {
+          .share-modal-button {
+            width: 100% !important;
+          }
+        }
+        .no-select-link-input input {
+          user-select: none !important;
+          -webkit-user-select: none !important;
+          -moz-user-select: none !important;
+          -ms-user-select: none !important;
+          cursor: default !important;
+        }
+        .no-select-link-input input:focus {
+          outline: none !important;
+          border-color: #dbe0e6 !important;
+        }
+      `}</style>
+      <Modal
+        open={shareMethodModal}
+        onCancel={() => {
+          if (!sendingEmail) {
+            setShareMethodModal(false);
+            setSelectedInvoice(null);
+            setLinkCopied(false);
+          }
+        }}
+        footer={null}
+        width={672}
+        styles={{
+          body: { padding: 0 }
+        }}
+        closable={!sendingEmail}
+        maskClosable={!sendingEmail}
+        destroyOnClose={false}
+        forceRender={false}
+      >
+        {/* Header */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between', 
+          gap: 16,
+          padding: '24px',
+          borderBottom: '1px solid #e5e7eb'
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <p style={{ 
+              fontSize: '20px', 
+              fontWeight: 700, 
+              color: '#111418', 
+              margin: 0,
+              lineHeight: '1.2',
+              letterSpacing: '-0.02em'
+            }}>
+              Dalīties ar rēķinu {selectedInvoice?.invoice_number}
+            </p>
+            <p style={{ 
+              fontSize: '14px', 
+              color: '#617589', 
+              margin: '4px 0 0 0'
+            }}>
+              Izvēlieties, kā vēlaties nosūtīt rēķinu
+            </p>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '24px' }}>
+          {/* Email Section */}
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: 16,
+            borderRadius: '12px',
+            border: '1px solid #e5e7eb',
+            background: 'white',
+            padding: '20px'
+          }}>
+            <h3 style={{ 
+              fontSize: '16px', 
+              fontWeight: 700, 
+              lineHeight: '1.2',
+              letterSpacing: '-0.015em',
+              color: '#111418',
+              margin: 0
+            }}>
+              Nosūtīt e-pastu klientam
+            </h3>
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: 16,
+              width: '100%'
+            }}
+            className="sm:flex-row sm:items-end"
+            >
+              <label style={{ 
+                display: 'flex', 
+                flexDirection: 'column',
+                width: '100%',
+                flex: 1,
+                minWidth: 0
+              }}>
+                <p style={{ 
+                  paddingBottom: '8px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  lineHeight: 'normal',
+                  color: '#111418',
+                  margin: 0
+                }}>
+                  Klienta e-pasts
+                </p>
+                <Input
+                  prefix={<MailOutlined style={{ color: '#9ca3af', fontSize: '18px' }} />}
+                  value={selectedInvoice?.customer_email || ''}
+                  readOnly
+                  style={{
+                    height: '48px',
+                    borderRadius: '8px',
+                    border: '1px solid #dbe0e6',
+                    paddingLeft: '40px',
+                    fontSize: '16px',
+                    fontWeight: 400,
+                    color: '#111418',
+                    width: '100%'
+                  }}
+                />
+              </label>
+              <div style={{ width: '100%' }} className="sm:w-auto">
+                <Popconfirm
+                  title="Nosūtīt e-pastu?"
+                  description={
+                    <div>
+                      <p>Vai tiešām vēlaties nosūtīt rēķinu uz {selectedInvoice?.customer_email}?</p>
+                      <p style={{ 
+                        marginTop: '8px', 
+                        fontSize: '13px', 
+                        color: '#6b7280',
+                        lineHeight: 1.5
+                      }}>
+                        Lūdzu, ņemiet vērā, ka e-pastu var nosūtīt tikai reizi 5 minūtēs, lai novērstu pārāk biežu nosūtīšanu.
+                      </p>
+                    </div>
+                  }
+                  onConfirm={async (e) => {
+                    e?.stopPropagation?.();
+                    e?.preventDefault?.();
+                    await handleSendEmailResend();
+                  }}
+                  okText="Nosūtīt"
+                  cancelText="Atcelt"
+                  okButtonProps={{
+                    style: { background: '#137fec', borderColor: '#137fec' }
+                  }}
+                  disabled={sendingEmail}
+                  onOpenChange={(open) => {
+                    // Prevent Popconfirm from affecting modal state
+                    if (!open && sendingEmail) {
+                      return false;
+                    }
+                  }}
+                >
+                  <Button
+                    type="primary"
+                    loading={sendingEmail}
+                    disabled={sendingEmail}
+                    className="share-modal-button"
+                    style={{
+                      height: '48px',
+                      minWidth: '84px',
+                      width: '100%',
+                      borderRadius: '8px',
+                      background: '#137fec',
+                      border: 'none',
+                      fontSize: '16px',
+                      fontWeight: 700,
+                      letterSpacing: '0.015em',
+                      padding: '0 20px'
+                    }}
+                  >
+                    Nosūtīt e-pastu
+                  </Button>
+                </Popconfirm>
+              </div>
+            </div>
+          </div>
+
+          {/* Separator with "VAI" */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            margin: '8px 0'
+          }}>
+            <div style={{
+              flex: 1,
+              height: '1px',
+              background: '#e5e7eb'
+            }}></div>
+            <div style={{
+              fontSize: '14px',
+              fontWeight: 600,
+              color: '#6b7280',
+              padding: '0 12px'
+            }}>
+              VAI
+            </div>
+            <div style={{
+              flex: 1,
+              height: '1px',
+              background: '#e5e7eb'
+            }}></div>
+          </div>
+
+          {/* Link Section */}
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: 16,
+            borderRadius: '12px',
+            border: '1px solid #e5e7eb',
+            background: 'white',
+            padding: '20px'
+          }}>
+            <h3 style={{ 
+              fontSize: '16px', 
+              fontWeight: 700, 
+              lineHeight: '1.2',
+              letterSpacing: '-0.015em',
+              color: '#111418',
+              margin: 0
+            }}>
+              Kopēt koplietojamo saiti
+            </h3>
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: 16,
+              width: '100%'
+            }}
+            className="sm:flex-row sm:items-center"
+            >
+              <div style={{ 
+                position: 'relative',
+                display: 'flex',
+                width: '100%',
+                flex: 1,
+                minWidth: 0
+              }}>
+                <Input
+                  prefix={<LinkOutlined style={{ color: '#9ca3af', fontSize: '18px' }} />}
+                  value={getPublicInvoiceUrl(selectedInvoice)}
+                  readOnly
+                  onFocus={(e) => e.target.blur()}
+                  onSelect={(e) => e.preventDefault()}
+                  style={{
+                    height: '48px',
+                    borderRadius: '8px',
+                    border: '1px solid #dbe0e6',
+                    background: '#f9fafb',
+                    paddingLeft: '40px',
+                    fontSize: '16px',
+                    fontWeight: 400,
+                    color: '#617589',
+                    width: '100%',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none',
+                    MozUserSelect: 'none',
+                    msUserSelect: 'none',
+                    cursor: 'default'
+                  }}
+                  className="no-select-link-input"
+                />
+              </div>
+              <div style={{ width: '100%' }} className="sm:w-auto">
+                <Button
+                  icon={<CopyOutlined />}
+                  onClick={handleCopyLinkResend}
+                  className="share-modal-button"
+                  style={{
+                    height: '48px',
+                    minWidth: '84px',
+                    width: '100%',
+                    borderRadius: '8px',
+                    background: 'rgba(19, 127, 236, 0.1)',
+                    border: 'none',
+                    color: '#137fec',
+                    fontSize: '16px',
+                    fontWeight: 700,
+                    letterSpacing: '0.015em',
+                    padding: '0 20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!linkCopied) {
+                      e.currentTarget.style.background = 'rgba(19, 127, 236, 0.2)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!linkCopied) {
+                      e.currentTarget.style.background = 'rgba(19, 127, 236, 0.1)';
+                    }
+                  }}
+                >
+                  {linkCopied ? 'Kopēts!' : 'Kopēt'}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       </Modal>
 
@@ -525,6 +1232,16 @@ const Invoices = () => {
 
         .custom-table .ant-table-tbody > tr.custom-table-row:hover {
           background: #f9fafb;
+        }
+
+        /* Highlight draft invoices */
+        .custom-table .ant-table-tbody > tr.draft-row {
+          background: #fffbeb !important;
+          border-left: 3px solid #f59e0b;
+        }
+
+        .custom-table .ant-table-tbody > tr.draft-row:hover > td {
+          background: #fef3c7 !important;
         }
 
         .action-button:hover {

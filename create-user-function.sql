@@ -54,7 +54,8 @@ CREATE OR REPLACE FUNCTION public.create_user_profile(
   p_email TEXT,
   p_username TEXT,
   p_role TEXT DEFAULT 'employee',
-  p_status TEXT DEFAULT 'active'
+  p_status TEXT DEFAULT 'active',
+  p_created_by UUID DEFAULT NULL
 )
 RETURNS UUID
 LANGUAGE plpgsql
@@ -72,14 +73,15 @@ BEGIN
   END IF;
 
   -- Insert into user_profiles
-  INSERT INTO user_profiles (id, email, username, role, status)
-  VALUES (p_user_id, p_email, p_username, p_role, p_status)
+  INSERT INTO user_profiles (id, email, username, role, status, created_by)
+  VALUES (p_user_id, p_email, p_username, p_role, p_status, p_created_by)
   ON CONFLICT (id) DO UPDATE
   SET
     email = EXCLUDED.email,
     username = EXCLUDED.username,
     role = EXCLUDED.role,
     status = EXCLUDED.status,
+    created_by = EXCLUDED.created_by,
     updated_at = NOW();
 
   RETURN p_user_id;
@@ -87,6 +89,7 @@ END;
 $$;
 
 -- Grant execute permission to authenticated users (admins only via RLS)
-GRANT EXECUTE ON FUNCTION public.create_user_profile(UUID, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+-- Note: Must match the full function signature including all parameters
+GRANT EXECUTE ON FUNCTION public.create_user_profile(UUID, TEXT, TEXT, TEXT, TEXT, UUID) TO authenticated;
 
 

@@ -10,6 +10,7 @@ export const useUserRole = () => {
   const { currentUser } = useAuth();
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true); // Track initial load separately
 
   useEffect(() => {
     if (currentUser) {
@@ -17,19 +18,29 @@ export const useUserRole = () => {
     } else {
       setUserProfile(null);
       setLoading(false);
+      setInitialLoad(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
   const loadProfile = async () => {
-    setLoading(true);
+    // Only show loading on initial load, not on refreshes
+    if (initialLoad) {
+      setLoading(true);
+    }
+    
     try {
       const profile = await db.getById('user_profiles', currentUser.id);
       setUserProfile(profile);
+      console.log('User profile loaded:', { id: profile?.id, role: profile?.role, status: profile?.status });
     } catch (error) {
       console.error('Error loading user profile:', error);
       setUserProfile(null);
     } finally {
-      setLoading(false);
+      if (initialLoad) {
+        setLoading(false);
+        setInitialLoad(false); // Mark initial load as complete
+      }
     }
   };
 

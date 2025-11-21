@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { ConfigProvider, App as AntdApp } from 'antd'
 import lvLV from 'antd/locale/lv_LV'
 import { AuthProvider } from './contexts/AuthContext'
+import { NotificationProvider } from './contexts/NotificationContext'
 import './index.css'
 import App from './App.jsx'
 
@@ -37,11 +38,13 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <ConfigProvider theme={theme} locale={lvLV}>
-          <AntdApp>
-            <App />
-          </AntdApp>
-        </ConfigProvider>
+        <NotificationProvider>
+          <ConfigProvider theme={theme} locale={lvLV}>
+            <AntdApp>
+              <App />
+            </AntdApp>
+          </ConfigProvider>
+        </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

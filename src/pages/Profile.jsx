@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, Typography, Form, Input, Button, message, Modal, Space } from 'antd';
+import { Card, Typography, Form, Input, Button, message, Modal, Space, App } from 'antd';
 import { LockOutlined, ExclamationCircleOutlined, UserOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
@@ -16,6 +16,7 @@ const Profile = () => {
   const [deletingAccount, setDeletingAccount] = useState(false);
   const { userProfile, signOut } = useAuth();
   const navigate = useNavigate();
+  const { message: messageApi } = App.useApp();
 
   // Handle password change
   const handlePasswordChange = async (values) => {
@@ -29,7 +30,7 @@ const Profile = () => {
       });
 
       if (verifyError) {
-        message.error('Nepareiza pašreizējā parole');
+        messageApi.error('Nepareiza pašreizējā parole');
         setChangingPassword(false);
         return;
       }
@@ -41,11 +42,24 @@ const Profile = () => {
 
       if (updateError) throw updateError;
 
-      message.success('Parole veiksmīgi nomainīta');
+      messageApi.success('Parole veiksmīgi nomainīta');
       passwordForm.resetFields();
     } catch (error) {
       console.error('Error changing password:', error);
-      message.error('Kļūda maiņot paroli');
+      
+      // Extract and display the actual error message
+      let errorMessage = 'Kļūda maiņot paroli';
+      const errorMsg = error?.message || '';
+      
+      if (errorMsg.includes('New password should be different')) {
+        errorMessage = 'Jaunajai parolei jābūt atšķirīgai no pašreizējās paroles';
+      } else if (errorMsg.includes('Password')) {
+        errorMessage = errorMsg;
+      } else if (errorMsg) {
+        errorMessage = errorMsg;
+      }
+      
+      messageApi.error(errorMessage);
     } finally {
       setChangingPassword(false);
     }
@@ -63,7 +77,7 @@ const Profile = () => {
       });
 
       if (verifyError) {
-        message.error('Nepareiza parole');
+        messageApi.error('Nepareiza parole');
         setDeletingAccount(false);
         return;
       }
@@ -79,13 +93,13 @@ const Profile = () => {
       // Sign out user (this will also trigger cascade delete in auth.users)
       await signOut();
 
-      message.success('Konts veiksmīgi izdzēsts');
+      messageApi.success('Konts veiksmīgi izdzēsts');
       
       // Navigate to login
       navigate('/login');
     } catch (error) {
       console.error('Error deleting account:', error);
-      message.error('Kļūda dzēšot kontu');
+      messageApi.error('Kļūda dzēšot kontu');
       setDeletingAccount(false);
     }
   };
@@ -98,11 +112,6 @@ const Profile = () => {
           <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
             Profila iestatījumi
           </Title>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <Text style={{ fontSize: '14px', color: '#6b7280' }}>Dashboard</Text>
-            <Text style={{ fontSize: '14px', color: '#6b7280' }}>/</Text>
-            <Text style={{ fontSize: '14px', color: '#111827', fontWeight: 500 }}>Profils</Text>
-          </div>
         </div>
 
         {/* User Info Card */}
@@ -352,6 +361,13 @@ const Profile = () => {
 };
 
 export default Profile;
+
+
+
+
+
+
+
 
 
 

@@ -36,6 +36,10 @@ MOZELLO_API_URL=https://api.mozello.com/v1
 MOZELLO_API_KEY=your_mozello_api_key_here
 SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+RESEND_API_KEY=re_xxxxx...
+FROM_EMAIL=noreply@yourdomain.com
+COMPANY_NAME=Your Company Name
+PUBLIC_SITE_URL=https://yoursite.com
 ```
 
 ---
@@ -67,6 +71,25 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 3. Copy:
    - **API URL** → `VITE_MOZELLO_API_URL` and `MOZELLO_API_URL`
    - **API Key** → `VITE_MOZELLO_API_KEY` and `MOZELLO_API_KEY`
+
+### Resend (Email Service)
+1. Go to **[Resend Dashboard](https://resend.com)**
+2. Sign up or login (free tier: 3,000 emails/month, 100 emails/day)
+3. **Add your domain** (`piffdeals.lv`):
+   - Go to **Domains** section
+   - Click **Add Domain**
+   - Add DNS records (SPF, DKIM, DMARC) provided by Resend
+   - Verify domain (wait for DNS propagation)
+4. Go to **API Keys** section
+5. Create new API key or copy existing one
+6. Copy the key (starts with `re_`) → `RESEND_API_KEY`
+7. Set `FROM_EMAIL`:
+   - **Recommended:** `info@piffdeals.lv` (requires domain verification)
+   - **For testing only:** `onboarding@resend.dev` (no domain needed, but emails may go to spam)
+8. Set `COMPANY_NAME` to your business name (e.g., `Piffdeals`)
+9. Set `PUBLIC_SITE_URL` to your production URL (e.g., `https://staff.piffdeals.lv`)
+   
+**📧 See [RESEND_EMAIL_SETUP.md](RESEND_EMAIL_SETUP.md) for detailed setup instructions and domain verification.**
 
 ---
 
@@ -129,5 +152,8 @@ STRIPE_SECRET_KEY=sk_live_...
 ---
 
 See `STRIPE_PAYMENT_SETUP.md` for complete setup instructions.
+
+
+
 
 

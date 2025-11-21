@@ -1,0 +1,602 @@
+// Send Password Reset Email Edge Function
+// Sends password reset link to user via email
+
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+interface PasswordResetEmailRequest {
+  userEmail: string;
+  userName: string;
+}
+
+serve(async (req) => {
+  console.log('Function invoked:', req.method);
+  
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    console.log('Handling OPTIONS request');
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  try {
+    console.log('Processing POST request');
+    
+    // Get Authorization header and apikey
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
+    const apikeyHeader = req.headers.get('apikey') || req.headers.get('Apikey');
+    
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: No authorization header' }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Get environment variables
+    const urlMatch = req.url.match(/https?:\/\/([^.]+)\.supabase\.co/);
+    const projectRef = urlMatch ? urlMatch[1] : null;
+    
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || 
+      (projectRef ? `https://${projectRef}.supabase.co` : null) ||
+      Deno.env.get('SUPABASE_PROJECT_URL');
+    
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || 
+      Deno.env.get('ANON_KEY') ||
+      Deno.env.get('SUPABASE_KEY') ||
+      apikeyHeader;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Server configuration error: Missing Supabase credentials',
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Extract token from Authorization header
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    
+    // Create Supabase client
+    const supabaseClient = createClient(
+      supabaseUrl,
+      supabaseAnonKey,
+      {
+        global: {
+          headers: {
+            Authorization: authHeader,
+            apikey: supabaseAnonKey,
+          },
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
+    );
+
+    // Verify user authentication
+    let user: any = null;
+    let userError: any = null;
+    
+    try {
+      const verifyResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: {
+          'Authorization': authHeader,
+          'apikey': supabaseAnonKey,
+        },
+      });
+      
+      if (verifyResponse.ok) {
+        const userData = await verifyResponse.json();
+        user = userData;
+      } else {
+        const errorText = await verifyResponse.text();
+        userError = new Error(`Token verification failed: ${verifyResponse.status}`);
+      }
+    } catch (apiError) {
+      const getUserResult = await supabaseClient.auth.getUser();
+      user = getUserResult.data?.user;
+      userError = getUserResult.error;
+      
+      if (userError || !user) {
+        const sessionResult = await supabaseClient.auth.getSession();
+        if (sessionResult.data?.session?.user) {
+          user = sessionResult.data.session.user;
+          userError = null;
+        }
+      }
+    }
+
+    if (userError || !user) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Unauthorized',
+          message: userError?.message || 'Auth session missing!'
+        }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Verify user has admin or super_admin role
+    const { data: userProfile, error: profileError } = await supabaseClient
+      .from('user_profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profileError || !userProfile) {
+      return new Response(
+        JSON.stringify({ error: 'Failed to verify user permissions' }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    if (!['admin', 'super_admin'].includes(userProfile.role)) {
+      return new Response(
+        JSON.stringify({ error: 'Forbidden: Admin access required' }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Parse request body
+    const body: PasswordResetEmailRequest = await req.json();
+    const { userEmail, userName } = body;
+
+    if (!userEmail || !userName) {
+      return new Response(
+        JSON.stringify({ error: 'Missing required fields' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Create admin client to generate password reset token
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
+    // Check cooldown - prevent spam (10 minutes)
+    const { data: profileData, error: profileCheckError } = await supabaseAdmin
+      .from('user_profiles')
+      .select('last_password_reset_sent')
+      .eq('email', userEmail.toLowerCase())
+      .maybeSingle();
+
+    if (!profileCheckError && profileData?.last_password_reset_sent) {
+      const lastSent = new Date(profileData.last_password_reset_sent);
+      const now = new Date();
+      const minutesSinceLastSent = (now.getTime() - lastSent.getTime()) / (1000 * 60);
+      
+      if (minutesSinceLastSent < 10) {
+        const remainingMinutes = Math.ceil(10 - minutesSinceLastSent);
+        return new Response(
+          JSON.stringify({ 
+            error: 'Cooldown active',
+            message: `Please wait ${remainingMinutes} minute(s) before sending another password reset email.`,
+            cooldownRemaining: remainingMinutes * 60, // seconds
+          }),
+          {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
+    // Detect if we're in development mode
+    // Check the Origin header from the request to determine if we should use localhost
+    const origin = req.headers.get('Origin') || req.headers.get('origin') || '';
+    const isDevelopment = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('://localhost:');
+    
+    console.log('Origin header:', origin, 'isDevelopment:', isDevelopment);
+    
+    // Use localhost for dev, otherwise use PUBLIC_SITE_URL
+    const publicSiteUrlEnv = Deno.env.get('PUBLIC_SITE_URL') || 'http://localhost:5173';
+    const publicSiteUrl = isDevelopment || publicSiteUrlEnv.includes('localhost') || publicSiteUrlEnv.includes('127.0.0.1')
+      ? 'http://localhost:5173'
+      : publicSiteUrlEnv.replace(/\/$/, '');
+    
+    console.log('Using publicSiteUrl:', publicSiteUrl);
+
+    // Generate password reset token using admin API
+    const { data: resetData, error: resetError } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'recovery',
+      email: userEmail,
+      options: {
+        redirectTo: `${publicSiteUrl}/reset-password`,
+      },
+    });
+
+    if (resetError || !resetData) {
+      console.error('Error generating reset link:', resetError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to generate password reset link' }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Use the action_link from Supabase, but replace the redirect URL with our reset-password page
+    // The action_link contains the token and will automatically authenticate the correct user
+    let resetPasswordUrl = '';
+    
+    try {
+      // The action_link from Supabase looks like: https://project.supabase.co/auth/v1/verify?token=...&type=recovery&redirect_to=...
+      // We need to extract the token and create our own URL that points to our reset-password page
+      const actionLinkUrl = new URL(resetData.properties.action_link);
+      
+      // Get all the query parameters from the original link
+      const token = actionLinkUrl.searchParams.get('token') || actionLinkUrl.searchParams.get('token_hash') || '';
+      const type = actionLinkUrl.searchParams.get('type') || 'recovery';
+      
+      if (token) {
+        // Create our reset password URL with the token
+        // This ensures the token is for the correct user (the one specified by email in generateLink)
+        resetPasswordUrl = `${publicSiteUrl}/reset-password?token=${encodeURIComponent(token)}&type=${type}`;
+      } else {
+        // Fallback: try to extract token from the URL string directly
+        const tokenMatch = resetData.properties.action_link.match(/[?&](?:token|token_hash)=([^&]+)/);
+        if (tokenMatch && tokenMatch[1]) {
+          resetPasswordUrl = `${publicSiteUrl}/reset-password?token=${encodeURIComponent(tokenMatch[1])}&type=${type}`;
+        } else {
+          throw new Error('Could not extract token from reset link');
+        }
+      }
+      
+      console.log('Reset password URL created for user:', userEmail);
+    } catch (urlError) {
+      console.error('Error parsing reset link:', urlError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to parse reset link' }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    const logoImageUrl = `${publicSiteUrl}/images/S-3.png`;
+    const textLogoUrl = `${publicSiteUrl}/images/piffdeals_logo_text_primary.svg`;
+    
+    // Use URLs directly for faster response (images will load from email client)
+    // Skip base64 conversion to make response instant
+    const finalLogoUrl = logoImageUrl;
+    const finalTextLogoUrl = textLogoUrl;
+
+    // Get email configuration
+    const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+    const FROM_EMAIL = Deno.env.get('FROM_EMAIL') || 'noreply@example.com';
+    const COMPANY_NAME = Deno.env.get('COMPANY_NAME') || 'Piffdeals';
+
+    if (!RESEND_API_KEY) {
+      console.error('RESEND_API_KEY not set');
+      return new Response(
+        JSON.stringify({ error: 'Email service not configured' }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Email HTML template
+    const emailHtml = `
+<!DOCTYPE html>
+<html lang="lv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Paroles maiņa - ${COMPANY_NAME}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!--[if mso]>
+  <style type="text/css">
+    body, table, td {font-family: Arial, sans-serif !important;}
+  </style>
+  <![endif]-->
+</head>
+<body style="margin: 0; padding: 0; background-color: #EBF3FF; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #EBF3FF; padding: 40px 20px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #0068FF 0%, #4F91ED 100%); padding: 32px 40px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td align="center" style="padding: 0;">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+                      <tr>
+                        <td align="center" valign="middle" style="padding-right: 12px;">
+                          <img src="${finalLogoUrl}" alt="${COMPANY_NAME} Logo" width="40" height="40" style="width: 40px; height: 40px; display: block; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
+                        </td>
+                        <td align="left" valign="middle">
+                          <img src="${finalTextLogoUrl}" alt="${COMPANY_NAME}" width="auto" height="24" style="height: 24px; width: auto; display: block; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          
+          <!-- Content Area -->
+          <tr>
+            <td style="padding: 40px; background-color: #ffffff;">
+              
+              <!-- Greeting -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td style="padding-bottom: 24px;">
+                    <div style="font-size: 18px; font-weight: 600; color: #212B36; line-height: 1.5;">
+                      Sveiki, ${userName}!
+                    </div>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Main Message -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td style="padding-bottom: 32px;">
+                    <div style="font-size: 16px; color: #637381; line-height: 1.6;">
+                      Jūs saņēmāt šo e-pastu, jo administrators pieprasīja paroles maiņu jūsu kontam. Noklikšķiniet uz zemāk esošās pogas, lai izveidotu jaunu paroli.
+                    </div>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- CTA Button -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td align="center" style="padding-bottom: 32px;">
+                    <a href="${resetPasswordUrl}" 
+                       style="display: inline-block; background-color: #0068FF; color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: 600; font-size: 16px; line-height: 1.5; text-align: center; box-shadow: 0 2px 4px rgba(0, 104, 255, 0.2);">
+                      Mainīt paroli
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Alternative Link -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td align="center" style="padding-bottom: 32px;">
+                    <div style="font-size: 13px; color: #637381; line-height: 1.6;">
+                      Ja poga nedarbojas, nokopējiet un ielīmējiet šo saiti savā pārlūkprogrammā:<br>
+                      <a href="${resetPasswordUrl}" style="color: #0068FF; text-decoration: underline; word-break: break-all;">${resetPasswordUrl}</a>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+              
+              <!-- Security Notice -->
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td style="padding-top: 32px; border-top: 1px solid #e2e8f0;">
+                    <div style="font-size: 14px; color: #637381; line-height: 1.6;">
+                      <strong>Drošības paziņojums:</strong> Ja jūs nepieprasījāt paroles maiņu, lūdzu, ignorējiet šo e-pastu vai sazinieties ar administratoru.
+                    </div>
+                  </td>
+                </tr>
+              </table>
+              
+            </td>
+          </tr>
+          
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f9fafb; padding: 32px 40px; text-align: center; border-top: 1px solid #e2e8f0;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr>
+                  <td align="center" style="padding-bottom: 16px;">
+                    <img src="${finalTextLogoUrl}" alt="${COMPANY_NAME}" width="auto" height="24" style="height: 24px; width: auto; display: block; margin: 0 auto; opacity: 0.7; max-width: 180px; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center">
+                    <div style="font-size: 12px; color: #9ca3af; line-height: 1.6;">
+                      © ${new Date().getFullYear()} ${COMPANY_NAME}. Visas tiesības aizsargātas.<br>
+                      <a href="https://www.piffdeals.lv" style="color: #0068FF; text-decoration: none; font-weight: 500;">www.piffdeals.lv</a>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `;
+
+    // Plain text version
+    const emailText = `Sveiki, ${userName}!
+
+Jūs saņēmāt šo e-pastu, jo administrators pieprasīja paroles maiņu jūsu kontam. Noklikšķiniet uz zemāk esošās saites, lai izveidotu jaunu paroli.
+
+Mainīt paroli: ${resetPasswordUrl}
+
+Drošības paziņojums: Ja jūs nepieprasījāt paroles maiņu, lūdzu, ignorējiet šo e-pastu vai sazinieties ar administratoru.
+
+© ${new Date().getFullYear()} ${COMPANY_NAME}. Visas tiesības aizsargātas.
+www.piffdeals.lv
+    `.trim();
+
+    // Send email via Resend
+    const emailResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: FROM_EMAIL,
+        to: [userEmail],
+        subject: `Paroles maiņa - ${COMPANY_NAME}`,
+        html: emailHtml,
+        text: emailText,
+        reply_to: FROM_EMAIL.includes('info@') ? FROM_EMAIL : FROM_EMAIL.replace(/^[^@]+@/, 'info@'),
+      }),
+    });
+
+    if (!emailResponse.ok) {
+      const error = await emailResponse.text();
+      console.error('Resend API error:', error);
+      throw new Error(`Failed to send email: ${error}`);
+    }
+
+    const emailData = await emailResponse.json();
+    console.log('Password reset email sent successfully:', emailData);
+
+    // Update last_password_reset_sent timestamp
+    await supabaseAdmin
+      .from('user_profiles')
+      .update({ last_password_reset_sent: new Date().toISOString() })
+      .eq('email', userEmail.toLowerCase());
+
+    // Get target user's profile for activity logging
+    const { data: targetUserProfile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id, email, username, role')
+      .eq('email', userEmail.toLowerCase())
+      .maybeSingle();
+
+    // Get current user's profile for activity logging
+    const { data: currentUserProfile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('email, username, role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    // Log activity using RPC function (SECURITY DEFINER bypasses RLS)
+    try {
+      // Get IP address from request headers
+      const ipAddress = req.headers.get('x-forwarded-for') || 
+                       req.headers.get('x-real-ip') || 
+                       req.headers.get('cf-connecting-ip') || 
+                       null;
+      
+      // Get user agent
+      const userAgent = req.headers.get('user-agent') || null;
+
+      // Use RPC function to log activity (SECURITY DEFINER allows service role to log)
+      const { error: logError } = await supabaseAdmin.rpc('log_activity', {
+        p_user_id: user.id,
+        p_action_type: 'password_reset_requested',
+        p_action_category: 'security',
+        p_description: `Password reset email sent to ${userName} (${userEmail})`,
+        p_details: JSON.stringify({
+          target_user_email: userEmail,
+          target_user_username: userName,
+          target_user_id: targetUserProfile?.id || null,
+          sent_by_admin: true,
+          email_id: emailData.id,
+        }),
+        p_target_type: 'user',
+        p_target_id: targetUserProfile?.id || null,
+        p_ip_address: ipAddress,
+        p_user_agent: userAgent,
+      });
+      
+      if (logError) {
+        console.error('Failed to log activity via RPC:', logError);
+        // Try direct insert as fallback (service role should bypass RLS)
+        try {
+          await supabaseAdmin
+            .from('activity_logs')
+            .insert({
+              user_id: user.id,
+              user_email: currentUserProfile?.email || user.email,
+              user_username: currentUserProfile?.username || user.user_metadata?.username,
+              user_role: currentUserProfile?.role || 'admin',
+              action_type: 'password_reset_requested',
+              action_category: 'security',
+              description: `Password reset email sent to ${userName} (${userEmail})`,
+              details: {
+                target_user_email: userEmail,
+                target_user_username: userName,
+                target_user_id: targetUserProfile?.id || null,
+                sent_by_admin: true,
+                email_id: emailData.id,
+              },
+              target_type: 'user',
+              target_id: targetUserProfile?.id || null,
+              ip_address: ipAddress,
+              user_agent: userAgent,
+            });
+          console.log('Activity logged via direct insert');
+        } catch (directInsertError) {
+          console.error('Failed to log activity via direct insert:', directInsertError);
+        }
+      } else {
+        console.log('Activity logged: password reset email sent');
+      }
+    } catch (logError) {
+      // Don't fail the request if logging fails
+      console.error('Exception logging activity:', logError);
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: 'Password reset email sent successfully',
+        emailId: emailData.id,
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
+    return new Response(
+      JSON.stringify({
+        error: 'Failed to send email',
+        message: error.message,
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
+  }
+});

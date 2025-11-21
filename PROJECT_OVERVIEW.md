@@ -250,68 +250,113 @@ But this makes queries and reports harder.
    - Example: Invoice #123 has 3 invoice_items (3 different products)
    - This structure allows proper queries and reports
 
-4. **Invoice Statuses & Rules**
+4. **Invoice Statuses & Rules** ⚡ NEW SYSTEM
+
+   **IMPORTANT**: Invoices are unique to their creator. Only the creator can edit or manage their own invoices.
 
    **`draft`** - Being created, not sent yet
-   - ✅ Can be edited by: Admin (any) OR Employee who created it
-   - ✅ Can be deleted by: Admin (any) OR Employee who created it
-   - ✅ Can be sent (changes to `sent`)
+   - ✅ Can be edited by: **ONLY the creator** (employee who created it)
+   - ✅ Can be deleted by: **ONLY the creator**
+   - ✅ Can be sent by: **ONLY the creator** (changes to `sent`)
    - ❌ Cannot be paid (must be sent first)
+   - 🗑️ **Auto-deletion**: Draft invoices older than 3 days are automatically deleted by cron job
+   - 🎨 **UI Highlight**: Draft invoices are highlighted with yellow background in the table
 
    **`sent`** - Sent to client, awaiting payment
-   - ❌ **LOCKED** - Cannot be edited by anyone (including admins)
+   - ❌ **LOCKED** - Cannot be edited by anyone (including creator)
+   - ✅ Can resend email: **ONLY the creator**
+   - ✅ Can mark as paid: **ONLY the creator** (manual verification)
    - ✅ Can be updated to: `paid`, `pending`, `overdue`, `cancelled`
-   - ✅ Can be cancelled by: Anyone (admin or employee)
+   - ✅ Can be cancelled by: **ONLY the creator**
    - ❌ Cannot be deleted
+   - 📧 **Resend Feature**: Creator can send reminder emails to client
 
-   **`paid`** - Payment received
+   **`pending`** - Payment in process (e.g., bank transfer pending, awaiting manual verification)
    - ❌ **LOCKED** - Cannot be edited by anyone
-   - ✅ Can be cancelled (if payment was refunded/error)
-   - ❌ Cannot be deleted
-   - ✅ Stock should be updated in Mozello API when status changes to paid
-
-   **`pending`** - Payment in process (e.g., bank transfer pending)
-   - ❌ **LOCKED** - Cannot be edited by anyone
+   - ✅ Can mark as paid: **ONLY the creator** (after verifying bank account)
+   - ✅ Can resend email: **ONLY the creator**
    - ✅ Can be updated to: `paid`, `overdue`, `cancelled`
    - ❌ Cannot be deleted
+   - 💡 **Use Case**: When client claims payment sent but not yet verified in bank account
+
+   **`paid`** - Payment received and verified
+   - ❌ **LOCKED** - Cannot be edited by anyone
+   - ❌ Cannot be cancelled (payment completed)
+   - ❌ Cannot be deleted (affects sales charts, financial records)
+   - ✅ Stock updated in Mozello API automatically when status changes to paid
+   - 📊 **Analytics Impact**: Included in sales reports and charts
 
    **`overdue`** - Past due date, not paid
    - ❌ **LOCKED** - Cannot be edited by anyone
+   - ✅ Can mark as paid: **ONLY the creator**
+   - ✅ Can resend email: **ONLY the creator**
    - ✅ Can be updated to: `paid`, `cancelled`
    - ❌ Cannot be deleted
    - 🔄 **Auto-update logic**: Invoice becomes overdue when:
      - `due_date` has passed (is in the past)
      - Status is `sent` or `pending` (not `paid` or `cancelled`)
-   - **Note**: System can automatically check and update status daily, or admin can manually mark as overdue
+   - **Note**: System can automatically check and update status daily, or creator can manually mark as overdue
 
    **`cancelled`** - Invoice cancelled
    - ❌ **LOCKED** - Cannot be edited by anyone
-   - ✅ Can be cancelled by: Anyone (admin or employee) at any time
+   - ✅ Can be cancelled by: **ONLY the creator** at any time
    - ✅ Stays in database (for records/audit)
    - ❌ Cannot be deleted
-   - ✅ Can be updated back to `draft` (if cancelled by mistake before sending)
+   - ❌ Cannot be reactivated (permanent cancellation)
 
-5. **Invoice Editing Rules**
-   - **Draft invoices**: Can be edited by creator (employee) or any admin
-   - **Sent/Paid/Pending/Overdue invoices**: LOCKED - cannot be edited by anyone
-   - **Cancelled invoices**: LOCKED - cannot be edited, but can be uncancelled back to draft if needed
-   - **Deletion**: Only draft invoices can be deleted by employees, admins can delete any
+5. **Invoice Permission System** 🔒 NEW
 
-6. **Session management**
+   **Creator-Only Access**:
+   - Each invoice is "owned" by the user who created it
+   - **No admin override**: Even admins and super_admins cannot edit others' invoices
+   - **View Access**: All users can view all invoices (for transparency)
+   - **Actions Available to Creator**:
+     - Edit draft invoices
+     - Delete draft invoices
+     - Send invoices to clients
+     - Resend invoice emails
+     - Mark invoices as paid (manual verification)
+     - Cancel invoices
+
+   **Why Creator-Only?**:
+   - **Accountability**: Each user is responsible for their own invoices
+   - **Data Integrity**: Prevents accidental modifications by other users
+   - **Audit Trail**: Clear ownership of each invoice
+   - **Business Logic**: Sales person handles their own deals end-to-end
+
+6. **Auto-Delete Draft Invoices** 🗑️ NEW
+
+   **Purpose**: Automatically delete abandoned draft invoices older than 3 days
+
+   **How it Works**:
+   - **Cron Job**: Runs daily at 2:00 AM UTC
+   - **Threshold**: Deletes drafts created more than 3 days ago
+   - **Cleanup**: Deletes both invoice and associated invoice_items
+   - **Logging**: Returns summary of deleted invoices
+
+   **Benefits**:
+   - Keeps database clean
+   - Encourages users to complete invoices promptly
+   - Prevents accumulation of abandoned drafts
+   - Improves system performance
+
+   **Setup**: See [AUTO_DELETE_DRAFTS_SETUP.md](AUTO_DELETE_DRAFTS_SETUP.md) for deployment instructions
+
+7. **Session management**
    - Active sessions prevent access to `/login`
    - Users are automatically redirected if already logged in
 
-7. **Customers**
+8. **Customers**
    - Can be stored in `customers` table if you want to reuse customer data
    - OR just store customer info directly in each invoice (simpler)
 
-8. **Stock Updates**
+9. **Stock Updates**
    - When invoice status changes to `paid`, stock is updated in Mozello API
    - Stock is NOT updated when invoice is created or sent (only when paid)
    - No need to track stock changes in database
    - API handles stock synchronization
 
-9. **Overdue Invoice Logic**
+10. **Overdue Invoice Logic**
    - **When does invoice become overdue?**
      - When `due_date` is in the past (today's date > due_date)
      - AND status is `sent` or `pending` (not `paid` or `cancelled`)

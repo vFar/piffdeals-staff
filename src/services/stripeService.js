@@ -19,11 +19,130 @@ export const stripeService = {
         }
       );
 
-      if (error) throw error;
+      if (error) {
+        console.error('=== STRIPE SERVICE ERROR ===');
+        console.error('Full error object:', error);
+        console.error('Error message:', error.message);
+        console.error('Error context:', error.context);
+        console.error('Error status:', error.status);
+        
+        // Supabase functions.invoke error structure:
+        // error.message - usually contains the error
+        // error.context - may contain Response object with the actual error body
+        
+        let errorMessage = error.message || 'Failed to create payment link';
+        let errorDetails = null;
+        
+        // Try to extract error from context (Response object)
+        if (error.context) {
+          console.error('Error context type:', typeof error.context);
+          console.error('Error context:', error.context);
+          
+          // If context is a Response object, read its body
+          if (error.context instanceof Response || (error.context.status && error.context.text)) {
+            try {
+              // Try to read the response body
+              const response = error.context;
+              if (response.text) {
+                const text = await response.text();
+                console.error('Error response body (text):', text);
+                try {
+                  const body = JSON.parse(text);
+                  if (body.error) {
+                    errorMessage = body.error;
+                    errorDetails = body.details || body.message;
+                    console.error('Extracted error from response body:', body);
+                  }
+                } catch (e) {
+                  // If not JSON, use the text as error message
+                  if (text) {
+                    errorMessage = text;
+                  }
+                }
+              }
+            } catch (e) {
+              console.error('Could not read error response body:', e);
+            }
+          } else if (error.context.body) {
+            // Context has body property
+            try {
+              const body = typeof error.context.body === 'string' 
+                ? JSON.parse(error.context.body) 
+                : error.context.body;
+              if (body.error) {
+                errorMessage = body.error;
+                errorDetails = body.details;
+                console.error('Extracted error from context body:', body);
+              }
+            } catch (e) {
+              console.error('Could not parse error context body:', e);
+            }
+          }
+        }
+        
+        // If data exists and contains error, use it (shouldn't happen with 500, but just in case)
+        if (data?.error) {
+          console.error('Error in data response:', data);
+          errorMessage = data.error;
+          errorDetails = data.details;
+        }
+        
+        // Create enhanced error with all details
+        const enhancedError = new Error(errorMessage + (errorDetails ? `: ${errorDetails}` : ''));
+        enhancedError.originalError = error;
+        enhancedError.errorDetails = data;
+        throw enhancedError;
+      }
+      
+      // Check if response contains an error (edge function returned 200 but with error field)
+      if (data?.error) {
+        console.error('Error in response:', data);
+        throw new Error(data.error + (data.details ? `: ${data.details}` : ''));
+      }
+
+      // Log the response for debugging
+      console.log('Stripe payment link response:', data);
+      console.log('Response type:', typeof data);
+      console.log('Response keys:', data ? Object.keys(data) : 'null');
+      
+      // Handle different possible response structures
+      // Supabase functions.invoke returns the JSON response directly
+      // But sometimes it might be wrapped or the edge function might return different structure
+      let paymentUrl = null;
+      let paymentLinkId = null;
+      
+      // Try different possible structures
+      if (data?.payment_url) {
+        paymentUrl = data.payment_url;
+        paymentLinkId = data.payment_link_id;
+      } else if (data?.data?.payment_url) {
+        paymentUrl = data.data.payment_url;
+        paymentLinkId = data.data.payment_link_id;
+      } else if (data?.success && data?.payment_url) {
+        paymentUrl = data.payment_url;
+        paymentLinkId = data.payment_link_id;
+      } else if (typeof data === 'string') {
+        // If response is a string, try to parse it
+        try {
+          const parsed = JSON.parse(data);
+          paymentUrl = parsed.payment_url || parsed.data?.payment_url;
+          paymentLinkId = parsed.payment_link_id || parsed.data?.payment_link_id;
+        } catch (e) {
+          console.error('Failed to parse string response:', e);
+        }
+      }
+      
+      if (!paymentUrl) {
+        console.error('No payment_url in response. Full response:', JSON.stringify(data, null, 2));
+        // Don't throw error - let the database update handle it
+        // The edge function should have saved it to the database
+        // We'll refresh from database instead
+        return null;
+      }
       
       return {
-        paymentUrl: data.payment_url,
-        paymentLinkId: data.payment_link_id,
+        paymentUrl,
+        paymentLinkId,
       };
     } catch (error) {
       console.error('Error creating Stripe payment link:', error);
@@ -46,5 +165,10 @@ export const stripeService = {
     return data;
   },
 };
+
+
+
+
+
 
 

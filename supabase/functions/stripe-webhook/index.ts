@@ -30,15 +30,37 @@ serve(async (req) => {
     
     // Handle different event types
     switch (event.type) {
-      case 'checkout.session.completed':
-      case 'payment_intent.succeeded': {
+      case 'checkout.session.completed': {
         const session = event.data.object
-        const invoiceId = session.metadata?.invoice_id
+        // For Payment Links, metadata is on the session object
+        let invoiceId = session.metadata?.invoice_id
+        
+        // If not found, try to get from payment_intent
+        if (!invoiceId && session.payment_intent) {
+          try {
+            const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent)
+            invoiceId = paymentIntent.metadata?.invoice_id
+          } catch (err) {
+            console.warn('Could not retrieve payment intent:', err)
+          }
+        }
         
         if (invoiceId) {
           console.log(`Processing payment for invoice: ${invoiceId}`)
           
-          // Update invoice status to PAID
+          // Check current invoice status
+          const { data: currentInvoice, error: fetchError } = await supabase
+            .from('invoices')
+            .select('status, stock_update_status')
+            .eq('id', invoiceId)
+            .single()
+          
+          if (fetchError) {
+            console.error('Error fetching invoice:', fetchError)
+            throw fetchError
+          }
+          
+          // Update invoice status to PAID (idempotent - safe to call multiple times)
           const { error: updateError } = await supabase
             .from('invoices')
             .update({
@@ -56,44 +78,160 @@ serve(async (req) => {
           
           console.log(`Invoice ${invoiceId} marked as paid`)
           
-          // Trigger stock update in Mozello
-          try {
-            const { error: stockError } = await supabase.functions.invoke(
-              'update-mozello-stock',
-              {
-                body: { invoice_id: invoiceId },
+          // Trigger stock update in Mozello (only if not already completed)
+          if (currentInvoice?.stock_update_status !== 'completed') {
+            try {
+              console.log(`Calling update-mozello-stock for invoice ${invoiceId}`)
+              
+              // Mark as pending first
+              await supabase
+                .from('invoices')
+                .update({
+                  stock_update_status: 'pending',
+                })
+                .eq('id', invoiceId)
+              
+              // Call the stock update function and wait for response
+              const { data: stockData, error: stockError } = await supabase.functions.invoke(
+                'update-mozello-stock',
+                {
+                  body: { invoice_id: invoiceId },
+                }
+              )
+              
+              if (stockError) {
+                console.error('Error updating stock:', stockError)
+                // Mark as failed
+                await supabase
+                  .from('invoices')
+                  .update({
+                    stock_update_status: 'failed',
+                  })
+                  .eq('id', invoiceId)
+              } else {
+                // Check if the function returned success
+                const success = stockData?.success !== false
+                console.log(`Stock update result for invoice ${invoiceId}:`, { success, data: stockData })
+                
+                await supabase
+                  .from('invoices')
+                  .update({
+                    stock_update_status: success ? 'completed' : 'failed',
+                    stock_updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', invoiceId)
               }
-            )
-            
-            if (stockError) {
-              console.error('Error updating stock:', stockError)
-              // Don't throw - invoice is already marked as paid
-              // Log the error for manual review
+            } catch (stockUpdateError) {
+              console.error('Stock update error:', stockUpdateError)
+              // Mark as failed but don't throw
               await supabase
                 .from('invoices')
                 .update({
                   stock_update_status: 'failed',
                 })
                 .eq('id', invoiceId)
-            } else {
-              console.log(`Stock updated for invoice ${invoiceId}`)
+            }
+          } else {
+            console.log(`Stock already updated for invoice ${invoiceId}, skipping`)
+          }
+        } else {
+          console.warn('No invoice_id found in webhook metadata')
+        }
+        break
+      }
+      
+      case 'payment_intent.succeeded': {
+        const paymentIntent = event.data.object
+        const invoiceId = paymentIntent.metadata?.invoice_id
+        
+        if (invoiceId) {
+          console.log(`Processing payment_intent.succeeded for invoice: ${invoiceId}`)
+          
+          // Check current invoice status
+          const { data: currentInvoice, error: fetchError } = await supabase
+            .from('invoices')
+            .select('status, stock_update_status')
+            .eq('id', invoiceId)
+            .single()
+          
+          if (fetchError) {
+            console.error('Error fetching invoice:', fetchError)
+            throw fetchError
+          }
+          
+          // Update invoice status to PAID (idempotent)
+          const { error: updateError } = await supabase
+            .from('invoices')
+            .update({
+              status: 'paid',
+              paid_date: new Date().toISOString(),
+              stripe_payment_intent_id: paymentIntent.id,
+              payment_method: 'stripe',
+            })
+            .eq('id', invoiceId)
+          
+          if (updateError) {
+            console.error('Error updating invoice:', updateError)
+            throw updateError
+          }
+          
+          console.log(`Invoice ${invoiceId} marked as paid`)
+          
+          // Trigger stock update in Mozello (only if not already completed)
+          if (currentInvoice?.stock_update_status !== 'completed') {
+            try {
+              console.log(`Calling update-mozello-stock for invoice ${invoiceId}`)
+              
+              // Mark as pending first
               await supabase
                 .from('invoices')
                 .update({
-                  stock_update_status: 'completed',
-                  stock_updated_at: new Date().toISOString(),
+                  stock_update_status: 'pending',
+                })
+                .eq('id', invoiceId)
+              
+              // Call the stock update function and wait for response
+              const { data: stockData, error: stockError } = await supabase.functions.invoke(
+                'update-mozello-stock',
+                {
+                  body: { invoice_id: invoiceId },
+                }
+              )
+              
+              if (stockError) {
+                console.error('Error updating stock:', stockError)
+                // Mark as failed
+                await supabase
+                  .from('invoices')
+                  .update({
+                    stock_update_status: 'failed',
+                  })
+                  .eq('id', invoiceId)
+              } else {
+                // Check if the function returned success
+                const success = stockData?.success !== false
+                console.log(`Stock update result for invoice ${invoiceId}:`, { success, data: stockData })
+                
+                await supabase
+                  .from('invoices')
+                  .update({
+                    stock_update_status: success ? 'completed' : 'failed',
+                    stock_updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', invoiceId)
+              }
+            } catch (stockUpdateError) {
+              console.error('Stock update error:', stockUpdateError)
+              // Mark as failed but don't throw
+              await supabase
+                .from('invoices')
+                .update({
+                  stock_update_status: 'failed',
                 })
                 .eq('id', invoiceId)
             }
-          } catch (stockUpdateError) {
-            console.error('Stock update error:', stockUpdateError)
-            // Mark as failed but don't throw
-            await supabase
-              .from('invoices')
-              .update({
-                stock_update_status: 'failed',
-              })
-              .eq('id', invoiceId)
+          } else {
+            console.log(`Stock already updated for invoice ${invoiceId}, skipping`)
           }
         }
         break
@@ -142,5 +280,11 @@ serve(async (req) => {
     )
   }
 })
+
+
+
+
+
+
 
 

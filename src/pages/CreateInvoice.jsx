@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
   App,
   Form,
@@ -11,9 +11,11 @@ import {
   Button,
   Space,
   Card,
-  Divider
+  Divider,
+  Alert,
+  Modal
 } from 'antd';
-import { DeleteOutlined, PlusOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, SaveOutlined, FileTextOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -23,14 +25,31 @@ import dayjs from 'dayjs';
 const { Option } = Select;
 const { TextArea } = Input;
 
-const CreateInvoice = () => {
+const CreateInvoice = ({ mode = 'create' }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { invoiceNumber: editInvoiceNumber } = useParams();
   const { currentUser } = useAuth();
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingInvoice, setLoadingInvoice] = useState(mode === 'edit');
   const [availableProducts, setAvailableProducts] = useState([]);
+  const [existingInvoice, setExistingInvoice] = useState(null);
+  const [saveTemplateModalVisible, setSaveTemplateModalVisible] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const templateLoadedRef = useRef(false);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('CreateInvoice mounted/updated:', {
+      mode,
+      editInvoiceNumber,
+      currentUser: currentUser ? 'exists' : 'null',
+      pathname: window.location.pathname
+    });
+  }, [mode, editInvoiceNumber, currentUser]);
 
   // Form state
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -39,22 +58,122 @@ const CreateInvoice = () => {
   ]);
 
   useEffect(() => {
-    generateInvoiceNumber();
+    if (mode === 'edit' && editInvoiceNumber) {
+      loadExistingInvoice();
+    } else {
+      generateInvoiceNumber();
+    }
     fetchProducts();
-    // Initialize form with default values
+    // Initialize form with default values for create mode
+    if (mode === 'create') {
+      form.setFieldsValue({
+        issueDate: dayjs(),
+      });
+    }
+  }, [form, mode, editInvoiceNumber]);
+
+  // Separate effect for template loading (only runs once when template is provided)
+  useEffect(() => {
+    if (mode === 'create' && location.state?.template && !templateLoadedRef.current) {
+      loadFromTemplate(location.state.template);
+      templateLoadedRef.current = true;
+      message.success('Parauga dati ielādēti');
+    }
+  }, [mode, location.state]);
+
+  const loadExistingInvoice = async () => {
+    try {
+      setLoadingInvoice(true);
+      
+      // Decode the invoice number in case it was URL encoded
+      const decodedInvoiceNumber = decodeURIComponent(editInvoiceNumber);
+      console.log('Loading invoice for editing with number:', decodedInvoiceNumber);
+      
+      // Fetch invoice
+      const { data: invoice, error: invoiceError } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('invoice_number', decodedInvoiceNumber)
+        .single();
+
+      if (invoiceError) throw invoiceError;
+
+      // Check if user is the creator
+      if (invoice.user_id !== currentUser.id) {
+        message.error('Jūs nevarat rediģēt šo rēķinu');
+        navigate('/invoices');
+        return;
+      }
+
+      // Check if invoice is draft
+      if (invoice.status !== 'draft') {
+        message.error('Var rediģēt tikai melnraksta rēķinus');
+        navigate('/invoices');
+        return;
+      }
+
+      // Fetch invoice items
+      const { data: invoiceItems, error: itemsError } = await supabase
+        .from('invoice_items')
+        .select('*')
+        .eq('invoice_id', invoice.id);
+
+      if (itemsError) throw itemsError;
+
+      // Set invoice data
+      setExistingInvoice(invoice);
+      setInvoiceNumber(invoice.invoice_number);
+
+      // Set form values
+      form.setFieldsValue({
+        clientName: invoice.customer_name,
+        clientEmail: invoice.customer_email,
+        clientPhone: invoice.customer_phone,
+        clientAddress: invoice.customer_address,
+        issueDate: dayjs(invoice.issue_date),
+        notes: invoice.notes,
+      });
+
+      // Set items
+      const loadedItems = invoiceItems.map((item, index) => ({
+        id: index + 1,
+        productHandle: item.product_id || '',
+        name: item.product_name,
+        quantity: item.quantity,
+        price: parseFloat(item.unit_price),
+        total: parseFloat(item.total),
+        stock: null, // Will be loaded when products are fetched
+      }));
+
+      setItems(loadedItems);
+
+    } catch (error) {
+      console.error('Error loading invoice:', error);
+      message.error('Neizdevās ielādēt rēķinu');
+      navigate('/invoices');
+    } finally {
+      setLoadingInvoice(false);
+    }
+  };
+
+  const loadFromTemplate = (template) => {
     form.setFieldsValue({
-      issueDate: dayjs(),
+      clientName: template.clientName,
+      clientEmail: template.clientEmail,
+      clientPhone: template.clientPhone,
+      clientAddress: template.clientAddress,
+      notes: template.notes || '',
     });
-  }, [form]);
+  };
 
   const generateInvoiceNumber = async () => {
-    // Generate unique invoice number: INV-########
+    // Generate unique invoice number: #########
     let isUnique = false;
     let newInvoiceNumber = '';
     
     while (!isUnique) {
       const random = String(Math.floor(Math.random() * 100000000)).padStart(8, '0');
-      newInvoiceNumber = `INV-${random}`;
+      newInvoiceNumber = `#${random}`;
       
       // Check if this invoice number already exists in database
       const { data, error } = await supabase
@@ -87,7 +206,34 @@ const CreateInvoice = () => {
     try {
       setLoadingProducts(true);
       const data = await mozelloService.getProducts();
-      setAvailableProducts(data.products || []);
+      const products = data.products || [];
+      
+      // Filter products that CAN BE PURCHASED
+      const purchasableProducts = products.filter(product => {
+        // 1. Check visibility - must be visible
+        if (!product.visible) return false;
+        
+        // 2. Check stock - must have stock > 0 OR null (unlimited)
+        const hasValidStock = product.stock === null || product.stock > 0;
+        
+        // 3. Check price - must have price on product level OR on variant level
+        const productPrice = product.sale_price || product.price;
+        const hasProductPrice = productPrice && parseFloat(productPrice) > 0;
+        
+        // Check if variants have price
+        const hasVariantPrice = product.variants && product.variants.length > 0 && 
+          product.variants.some(variant => {
+            const variantPrice = variant.sale_price || variant.price;
+            const hasPrice = variantPrice && parseFloat(variantPrice) > 0;
+            const hasStock = variant.stock === null || variant.stock > 0;
+            return hasPrice && hasStock;
+          });
+        
+        // Product is purchasable if it has valid stock AND (has product price OR has variant price)
+        return hasValidStock && (hasProductPrice || hasVariantPrice);
+      });
+      
+      setAvailableProducts(purchasableProducts);
     } catch (error) {
       console.error('Error loading products:', error);
       message.error('Neizdevās ielādēt produktus no veikala');
@@ -110,8 +256,20 @@ const CreateInvoice = () => {
     return parseFloat(price) || 0;
   };
 
+  // Maximum quantity limit per item (prevents input errors, allows bulk orders)
+  const MAX_QUANTITY = 999;
+
   const calculateItemTotal = (quantity, price) => {
     return (quantity * price).toFixed(2);
+  };
+
+  // Get available products for a specific item (excluding already selected products)
+  const getAvailableProductsForItem = (currentItemId) => {
+    const selectedHandles = items
+      .filter(item => item.id !== currentItemId && item.productHandle)
+      .map(item => item.productHandle);
+    
+    return availableProducts.filter(product => !selectedHandles.includes(product.handle));
   };
 
   const handleProductSelect = (id, productHandle) => {
@@ -124,9 +282,10 @@ const CreateInvoice = () => {
 
     setItems(items.map(item => {
       if (item.id === id) {
-        // If stock is limited and current quantity exceeds stock, adjust it
-        const maxQuantity = stock !== null ? stock : item.quantity;
-        const adjustedQuantity = stock !== null ? Math.min(item.quantity, stock) : item.quantity;
+        // Determine max quantity: stock limit OR MAX_QUANTITY, whichever is lower
+        const stockLimit = stock !== null ? stock : MAX_QUANTITY;
+        const maxAllowed = Math.min(stockLimit, MAX_QUANTITY);
+        const adjustedQuantity = Math.min(item.quantity, maxAllowed);
         
         const updatedItem = {
           ...item,
@@ -178,8 +337,46 @@ const CreateInvoice = () => {
     return calculateSubtotal(); // No tax for now
   };
 
-  const handleSave = async (sendInvoice = false) => {
-    console.log('handleSave called, sendInvoice:', sendInvoice);
+  const handleSaveAsTemplate = async () => {
+    try {
+      // Validate client fields and get all form values including notes
+      const values = await form.validateFields(['clientName', 'clientEmail', 'clientPhone', 'clientAddress']);
+      const allValues = form.getFieldsValue(); // Get all values including notes
+      
+      if (!templateName.trim()) {
+        message.error('Ievadiet parauga nosaukumu');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('invoice_templates')
+        .insert({
+          user_id: currentUser.id,
+          template_name: templateName.trim(),
+          customer_name: values.clientName,
+          customer_email: values.clientEmail,
+          customer_address: values.clientAddress,
+          customer_phone: values.clientPhone,
+          notes: allValues.notes || '',
+        });
+
+      if (error) throw error;
+
+      message.success('Paraugs saglabāts!');
+      setSaveTemplateModalVisible(false);
+      setTemplateName('');
+    } catch (error) {
+      if (error.errorFields) {
+        message.error('Aizpildiet visus obligātos laukus');
+        return;
+      }
+      console.error('Error saving template:', error);
+      message.error('Neizdevās saglabāt paraugu');
+    }
+  };
+
+  const handleSave = async () => {
+    console.log('handleSave called, mode:', mode);
     
     // Validate items
     if (items.some(item => !item.name || item.price <= 0)) {
@@ -200,31 +397,67 @@ const CreateInvoice = () => {
       const issueDate = formValues.issueDate;
       const dueDate = calculateDueDate(issueDate);
 
-      // Create invoice
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('invoices')
-        .insert({
-          invoice_number: invoiceNumber,
-          customer_name: formValues.clientName,
-          customer_email: formValues.clientEmail,
-          customer_address: formValues.clientAddress,
-          customer_phone: formValues.clientPhone,
-          issue_date: issueDate.format('YYYY-MM-DD'),
-          due_date: dueDate.format('YYYY-MM-DD'),
-          subtotal: calculateSubtotal(),
-          tax_rate: 0,
-          tax_amount: 0,
-          total: calculateTotal(),
-          status: sendInvoice ? 'sent' : 'draft',
-          notes: formValues.notes || '',
-          user_id: currentUser.id,
-        })
-        .select()
-        .single();
+      // Generate public_token for new invoices or if it doesn't exist
+      let publicToken = existingInvoice?.public_token;
+      if (!publicToken) {
+        publicToken = crypto.randomUUID();
+      }
 
-      if (invoiceError) throw invoiceError;
+      const invoiceData = {
+        customer_name: formValues.clientName,
+        customer_email: formValues.clientEmail,
+        customer_address: formValues.clientAddress,
+        customer_phone: formValues.clientPhone,
+        issue_date: issueDate.format('YYYY-MM-DD'),
+        due_date: dueDate.format('YYYY-MM-DD'),
+        subtotal: calculateSubtotal(),
+        tax_rate: 0,
+        tax_amount: 0,
+        total: calculateTotal(),
+        status: 'draft',
+        notes: formValues.notes || '',
+        public_token: publicToken, // Always include public_token
+      };
 
-      // Create invoice items
+      let invoice;
+
+      if (mode === 'edit' && existingInvoice) {
+        // Update existing invoice
+        const { data, error: invoiceError } = await supabase
+          .from('invoices')
+          .update(invoiceData)
+          .eq('id', existingInvoice.id)
+          .select()
+          .single();
+
+        if (invoiceError) throw invoiceError;
+        invoice = data;
+
+        // Delete old invoice items
+        const { error: deleteError } = await supabase
+          .from('invoice_items')
+          .delete()
+          .eq('invoice_id', existingInvoice.id);
+
+        if (deleteError) throw deleteError;
+
+      } else {
+        // Create new invoice
+        const { data, error: invoiceError } = await supabase
+          .from('invoices')
+          .insert({
+            ...invoiceData,
+            invoice_number: invoiceNumber,
+            user_id: currentUser.id,
+          })
+          .select()
+          .single();
+
+        if (invoiceError) throw invoiceError;
+        invoice = data;
+      }
+
+      // Create/update invoice items
       const invoiceItems = items.map(item => ({
         invoice_id: invoice.id,
         product_id: item.productHandle || null,
@@ -241,7 +474,10 @@ const CreateInvoice = () => {
       if (itemsError) throw itemsError;
 
       setLoading(false);
-      message.success(sendInvoice ? 'Rēķins nosūtīts!' : 'Rēķins saglabāts kā melnraksts');
+      const successMsg = mode === 'edit' 
+        ? 'Rēķins atjaunināts!'
+        : 'Rēķins izveidots!';
+      message.success(successMsg);
       navigate('/invoices');
     } catch (error) {
       if (error.errorFields) {
@@ -377,13 +613,23 @@ const CreateInvoice = () => {
           color: #6b7280 !important;
         }
       `}</style>
-      <Spin spinning={loading}>
+      <Spin spinning={loading || loadingInvoice}>
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
           <div style={{ marginBottom: 24 }}>
             <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }}>
-              Izveidot rēķinu
+              {mode === 'edit' ? 'Rediģēt rēķinu' : 'Izveidot rēķinu'}
             </h1>
           </div>
+
+          {mode === 'edit' && (
+            <Alert
+              message="Rediģēšanas režīms"
+              description="Jūs rediģējat melnraksta rēķinu. Saglabājiet izmaiņas vai nosūtiet rēķinu klientam."
+              type="info"
+              showIcon
+              style={{ marginBottom: 24 }}
+            />
+          )}
 
           <Card style={{ borderRadius: 12 }}>
             <Form
@@ -541,7 +787,7 @@ const CreateInvoice = () => {
                             }
                             optionLabelProp="label"
                           >
-                            {availableProducts.map(product => {
+                            {getAvailableProductsForItem(item.id).map(product => {
                               const imageUrl = product.pictures?.[0]?.url || null;
                               const title = getProductTitle(product);
                               const price = getProductPrice(product).toFixed(2);
@@ -587,18 +833,23 @@ const CreateInvoice = () => {
                           <div>
                             <InputNumber
                               min={1}
-                              max={item.stock !== null ? item.stock : undefined}
+                              max={item.stock !== null ? Math.min(item.stock, MAX_QUANTITY) : MAX_QUANTITY}
                               value={item.quantity}
                               onChange={(value) => {
-                                const maxQty = item.stock !== null ? item.stock : value;
+                                const stockLimit = item.stock !== null ? item.stock : MAX_QUANTITY;
+                                const maxQty = Math.min(stockLimit, MAX_QUANTITY);
                                 const finalValue = Math.min(value || 1, maxQty);
                                 handleItemChange(item.id, 'quantity', finalValue);
                               }}
                               style={{ width: '100%' }}
                             />
-                            {item.stock !== null && (
+                            {item.stock !== null ? (
                               <div style={{ fontSize: 11, color: item.stock < 5 ? '#ef4444' : '#6b7280', marginTop: 4 }}>
-                                Max: {item.stock}
+                                Max: {Math.min(item.stock, MAX_QUANTITY)}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+                                Max: {MAX_QUANTITY}
                               </div>
                             )}
                           </div>
@@ -679,27 +930,64 @@ const CreateInvoice = () => {
               </div>
 
               {/* Action Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-                <Button
-                  icon={<SaveOutlined />}
-                  onClick={() => handleSave(false)}
-                  loading={loading}
-                >
-                  Saglabāt melnrakstu
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<SendOutlined />}
-                  onClick={() => handleSave(true)}
-                  loading={loading}
-                >
-                  Nosūtīt rēķinu
-                </Button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                {mode === 'create' && (
+                  <Button
+                    icon={<FileTextOutlined />}
+                    onClick={() => setSaveTemplateModalVisible(true)}
+                    style={{
+                      borderColor: '#d9d9d9',
+                      color: '#0068FF',
+                    }}
+                  >
+                    Saglabāt kā šablonu
+                  </Button>
+                )}
+                <div style={{ display: 'flex', gap: 12, marginLeft: 'auto' }}>
+                  <Button
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    onClick={() => handleSave()}
+                    loading={loading}
+                  >
+                    {mode === 'edit' ? 'Saglabāt izmaiņas' : 'Izveidot rēķinu'}
+                  </Button>
+                </div>
               </div>
             </Form>
           </Card>
         </div>
       </Spin>
+
+      {/* Save Template Modal */}
+      <Modal
+        title="Saglabāt kā šablonu"
+        open={saveTemplateModalVisible}
+        onOk={handleSaveAsTemplate}
+        onCancel={() => {
+          setSaveTemplateModalVisible(false);
+          setTemplateName('');
+        }}
+        okText="Saglabāt"
+        cancelText="Atcelt"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: 8, fontWeight: 500, color: '#111827' }}>
+              Parauga nosaukums *
+            </label>
+            <Input
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              placeholder="Piemēram: Uzņēmums ABC"
+              onPressEnter={handleSaveAsTemplate}
+            />
+          </div>
+          <div style={{ fontSize: 13, color: '#6b7280' }}>
+            Tiks saglabāti klienta dati (vārds, e-pasts, telefons, adrese) un piezīmes. Produkti netiks saglabāti.
+          </div>
+        </div>
+      </Modal>
     </DashboardLayout>
   );
 };
