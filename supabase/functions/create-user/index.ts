@@ -46,16 +46,27 @@ serve(async (req) => {
     // Extract user ID from auth token to track who created this user
     const token = authHeader.replace('Bearer ', '');
     let createdBy = null;
+    let creatorProfile: any = null;
     
     try {
       // Verify the token and get the user using admin client
       const { data: { user: creatorUser }, error: userError } = await supabaseAdmin.auth.getUser(token);
       if (!userError && creatorUser) {
         createdBy = creatorUser.id;
+        
+        // Get creator's profile to verify role permissions
+        const { data: profile, error: profileError } = await supabaseAdmin
+          .from('user_profiles')
+          .select('role')
+          .eq('id', createdBy)
+          .maybeSingle();
+        
+        if (!profileError && profile) {
+          creatorProfile = profile;
+        }
       }
     } catch (error) {
       // If we can't verify the user, continue without created_by
-      console.warn('Could not verify creator user:', error);
     }
 
     // Parse request body
@@ -74,6 +85,51 @@ serve(async (req) => {
     // Validate status
     if (!['active', 'inactive', 'suspended'].includes(status)) {
       throw new Error('Invalid status');
+    }
+
+    // SECURITY: Verify user permissions - check creator's role
+    if (!creatorProfile) {
+      // If creator can't be verified, only allow creating employees (safety fallback)
+      if (role !== 'employee') {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Unauthorized: Cannot create non-employee accounts without proper verification',
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 403,
+          }
+        );
+      }
+    } else {
+      // SECURITY: Role-based permission check - enforce server-side
+      // Admins can only create employees, super_admins can create any role
+      if (creatorProfile.role === 'admin' && role !== 'employee') {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Forbidden: Administrators can only create employee accounts',
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 403,
+          }
+        );
+      }
+      
+      if (creatorProfile.role === 'employee') {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Forbidden: Employees cannot create user accounts',
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 403,
+          }
+        );
+      }
     }
 
     // Step 1: Create user in Supabase Auth
@@ -123,7 +179,6 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error creating user:', error);
     return new Response(
       JSON.stringify({
         success: false,

@@ -25,9 +25,6 @@ serve(async (req) => {
 
   // Wrap everything in try-catch to ensure errors are caught
   try {
-    console.log('=== Payment Link Creation Started ===');
-    console.log('Request method:', req.method);
-    console.log('Request URL:', req.url);
     // Parse request body safely
     let invoice_id, public_token;
     try {
@@ -106,47 +103,39 @@ serve(async (req) => {
       .eq('invoice_id', invoice_id)
     
     if (itemsError) {
-      console.error('Error fetching invoice items:', itemsError);
       throw itemsError;
     }
     
     if (!invoiceItems || invoiceItems.length === 0) {
-      console.error('Invoice has no items:', invoice_id);
       throw new Error('Invoice has no items');
     }
     
     // Validate invoice items have required fields
     for (const item of invoiceItems) {
       if (!item.product_name) {
-        console.error('Invoice item missing product_name:', item);
         throw new Error('Invoice item missing product_name');
       }
       if (item.unit_price === null || item.unit_price === undefined || isNaN(item.unit_price)) {
-        console.error('Invoice item has invalid unit_price:', item);
         throw new Error(`Invoice item has invalid unit_price: ${item.unit_price}`);
       }
       if (item.quantity === null || item.quantity === undefined || isNaN(item.quantity) || item.quantity <= 0) {
-        console.error('Invoice item has invalid quantity:', item);
         throw new Error(`Invoice item has invalid quantity: ${item.quantity}`);
       }
     }
     
     // Validate Stripe key exists
     if (!Deno.env.get('STRIPE_SECRET_KEY')) {
-      console.error('STRIPE_SECRET_KEY is not set');
       throw new Error('Stripe secret key is not configured');
     }
     
     // Validate invoice has customer email
     if (!invoice.customer_email) {
-      console.error('Invoice missing customer_email:', invoice_id);
       throw new Error('Invoice missing customer_email');
     }
     
     // Ensure invoice has a public_token for public access
     // If it doesn't have one, generate and save it
     if (!invoice.public_token) {
-      console.log('Invoice missing public_token, generating one...');
       const { data: updatedInvoice, error: updateError } = await supabase
         .from('invoices')
         .update({ public_token: crypto.randomUUID() })
@@ -155,23 +144,15 @@ serve(async (req) => {
         .single()
       
       if (updateError) {
-        console.error('Error generating public_token:', updateError);
         throw new Error('Failed to generate public token for invoice');
       }
       
       invoice.public_token = updatedInvoice.public_token
-      console.log('Generated public_token:', invoice.public_token);
     }
     
     // Get frontend URL from environment variable
     // Default to staff.piffdeals.lv (where the public invoice page is hosted)
     const frontendUrl = Deno.env.get('FRONTEND_URL') || 'https://staff.piffdeals.lv'
-    console.log('Using frontend URL:', frontendUrl);
-    console.log('Invoice public_token:', invoice.public_token);
-    
-    console.log('Creating Stripe Checkout Session for invoice:', invoice_id);
-    console.log('Invoice items count:', invoiceItems.length);
-    console.log('Customer email:', invoice.customer_email);
     
     // Create Stripe Checkout Session (instead of Payment Link for better customization)
     // Checkout Sessions support: Latvian language, custom branding, European payment methods
@@ -296,14 +277,6 @@ serve(async (req) => {
       // },
       });
     } catch (stripeError: any) {
-      console.error('=== STRIPE API ERROR ===');
-      console.error('Stripe error type:', stripeError.type);
-      console.error('Stripe error message:', stripeError.message);
-      console.error('Stripe error code:', stripeError.code);
-      console.error('Stripe error param:', stripeError.param);
-      console.error('Stripe error detail:', stripeError.detail);
-      console.error('Full Stripe error:', JSON.stringify(stripeError, null, 2));
-      
       // Provide more helpful error messages
       let errorMessage = `Stripe API error: ${stripeError.message || stripeError.toString()}`;
       
@@ -325,25 +298,8 @@ serve(async (req) => {
     const paymentUrl = session.url;
     const paymentLinkId = session.id;
     
-    // Log the checkout session with redirect URLs
-    console.log('Stripe Checkout Session created:', {
-      id: session.id,
-      url: session.url,
-      success_url: session.success_url,
-      cancel_url: session.cancel_url,
-      payment_status: session.payment_status,
-      locale: session.locale,
-    });
-    console.log('Redirect URLs configured:');
-    console.log(`  Success: ${frontendUrl}/i/${invoice.public_token}?payment=success`);
-    console.log(`  Cancel: ${frontendUrl}/i/${invoice.public_token}?payment=cancelled`);
-    
     // Ensure we have a URL
     if (!paymentUrl) {
-      console.error('Checkout session created but URL is missing!', {
-        sessionId: session.id,
-        sessionObject: session
-      });
       throw new Error('Checkout session URL is missing from Stripe response');
     }
     
@@ -357,11 +313,8 @@ serve(async (req) => {
       .eq('id', invoice_id)
     
     if (updateError) {
-      console.error('Error updating invoice with payment link:', updateError);
       throw updateError;
     }
-    
-    console.log('Invoice updated successfully with payment link');
     
     return new Response(
       JSON.stringify({
@@ -375,15 +328,6 @@ serve(async (req) => {
       }
     )
   } catch (error: any) {
-    console.error('=== ERROR IN PAYMENT LINK CREATION ===');
-    console.error('Error object:', error);
-    console.error('Error message:', error?.message);
-    console.error('Error stack:', error?.stack);
-    console.error('Error name:', error?.name);
-    console.error('Error type:', error?.type);
-    console.error('Error code:', error?.code);
-    console.error('Full error string:', error?.toString());
-    
     // Return more detailed error information
     const errorMessage = error?.message || error?.toString() || 'Failed to create payment link';
     const errorDetails = error?.toString() || JSON.stringify(error);
@@ -404,7 +348,6 @@ serve(async (req) => {
       } : null,
     };
     
-    console.error('Returning error response:', JSON.stringify(errorResponse, null, 2));
     
     return new Response(
       JSON.stringify(errorResponse),

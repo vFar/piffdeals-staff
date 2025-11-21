@@ -45,8 +45,6 @@ const Profile = () => {
       messageApi.success('Parole veiksmīgi nomainīta');
       passwordForm.resetFields();
     } catch (error) {
-      console.error('Error changing password:', error);
-      
       // Extract and display the actual error message
       let errorMessage = 'Kļūda maiņot paroli';
       const errorMsg = error?.message || '';
@@ -98,7 +96,6 @@ const Profile = () => {
       // Navigate to login
       navigate('/login');
     } catch (error) {
-      console.error('Error deleting account:', error);
       messageApi.error('Kļūda dzēšot kontu');
       setDeletingAccount(false);
     }

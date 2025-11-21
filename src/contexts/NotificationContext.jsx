@@ -338,7 +338,6 @@ export const NotificationProvider = ({ children }) => {
 
       setLastDailyDigest(today);
     } catch (error) {
-      console.error('Error checking daily digest:', error);
     }
   }, [userProfile, isAdmin, isSuperAdmin, lastDailyDigest, addNotification]);
 

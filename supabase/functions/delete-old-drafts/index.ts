@@ -33,8 +33,6 @@ serve(async (req) => {
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
     const cutoffDate = threeDaysAgo.toISOString();
 
-    console.log('Checking for draft invoices older than:', cutoffDate);
-
     // Find draft invoices older than 3 days
     const { data: oldDrafts, error: selectError } = await supabaseClient
       .from('invoices')
@@ -47,7 +45,6 @@ serve(async (req) => {
     }
 
     if (!oldDrafts || oldDrafts.length === 0) {
-      console.log('No old draft invoices found');
       return new Response(
         JSON.stringify({
           success: true,
@@ -60,8 +57,6 @@ serve(async (req) => {
         }
       );
     }
-
-    console.log(`Found ${oldDrafts.length} old draft invoice(s) to delete:`, oldDrafts);
 
     // Get all invoice IDs
     const invoiceIds = oldDrafts.map((invoice) => invoice.id);
@@ -86,8 +81,6 @@ serve(async (req) => {
       throw invoicesDeleteError;
     }
 
-    console.log(`Successfully deleted ${oldDrafts.length} old draft invoice(s)`);
-
     return new Response(
       JSON.stringify({
         success: true,
@@ -105,8 +98,6 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error deleting old draft invoices:', error);
-
     return new Response(
       JSON.stringify({
         success: false,

@@ -32,9 +32,7 @@ export const useUserRole = () => {
     try {
       const profile = await db.getById('user_profiles', currentUser.id);
       setUserProfile(profile);
-      console.log('User profile loaded:', { id: profile?.id, role: profile?.role, status: profile?.status });
     } catch (error) {
-      console.error('Error loading user profile:', error);
       setUserProfile(null);
     } finally {
       if (initialLoad) {

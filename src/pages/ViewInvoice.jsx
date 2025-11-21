@@ -52,23 +52,11 @@ const ViewInvoice = () => {
   const [warningModalVisible, setWarningModalVisible] = useState(false);
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
 
-  // Debug logging
-  useEffect(() => {
-    console.log('ViewInvoice mounted/updated:', {
-      invoiceNumber,
-      userProfile: userProfile ? 'loaded' : 'not loaded',
-      currentUser: currentUser ? 'exists' : 'null',
-      pathname: window.location.pathname
-    });
-  }, [invoiceNumber, userProfile, currentUser]);
 
   useEffect(() => {
     // Only fetch invoice when userProfile is loaded
     if (invoiceNumber && userProfile) {
-      console.log('Fetching invoice data for:', invoiceNumber);
       fetchInvoiceData();
-    } else if (invoiceNumber && !userProfile) {
-      console.log('Waiting for userProfile to load...');
     }
   }, [invoiceNumber, userProfile]);
 
@@ -78,7 +66,6 @@ const ViewInvoice = () => {
 
       // Decode the invoice number in case it was URL encoded
       const decodedInvoiceNumber = decodeURIComponent(invoiceNumber);
-      console.log('Fetching invoice with number:', decodedInvoiceNumber);
 
       // Fetch invoice by invoice_number
       const { data: invoiceData, error: invoiceError } = await supabase
@@ -88,7 +75,6 @@ const ViewInvoice = () => {
         .single();
 
       if (invoiceError) {
-        console.error('Error fetching invoice:', invoiceError);
         antMessage.error('Rēķins nav atrasts');
         navigate('/invoices');
         return;
@@ -135,7 +121,6 @@ const ViewInvoice = () => {
       });
 
     } catch (error) {
-      console.error('Error loading invoice:', error);
       antMessage.error('Neizdevās ielādēt rēķinu');
       navigate('/invoices');
     } finally {
@@ -149,7 +134,6 @@ const ViewInvoice = () => {
       const data = await mozelloService.getProducts();
       setAvailableProducts(data.products || []);
     } catch (error) {
-      console.error('Error loading products:', error);
       message.error('Neizdevās ielādēt produktus no veikala');
     } finally {
       setLoadingProducts(false);
@@ -328,7 +312,6 @@ const ViewInvoice = () => {
         return;
       }
       setSaving(false);
-      console.error('Error saving invoice:', error);
       message.error('Neizdevās saglabāt rēķinu');
     }
   };
@@ -383,7 +366,6 @@ const ViewInvoice = () => {
         setLinkCopied(false);
       }, 2000);
     } catch (error) {
-      console.error('Error copying to clipboard:', error);
       message.error('Neizdevās nokopēt saiti. Lūdzu, kopējiet manuāli.');
     }
   };
@@ -404,7 +386,6 @@ const ViewInvoice = () => {
           await stripeService.createPaymentLink(invoice.id);
           await fetchInvoiceData(); // Refresh to get the payment link
         } catch (error) {
-          console.error('Error creating payment link:', error);
           message.error('Neizdevās izveidot maksājuma saiti');
           setPreparingToSend(false);
           return;
@@ -460,9 +441,7 @@ const ViewInvoice = () => {
           })
           .eq('id', invoice.id);
         
-        if (updateError) {
-          console.error('Error updating invoice status:', updateError);
-        } else {
+        if (!updateError) {
           // Update local state
           setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
         }
@@ -478,11 +457,9 @@ const ViewInvoice = () => {
           setShareMethodModal(false);
         }, 500);
       } catch (error) {
-        console.error('Error copying to clipboard:', error);
         message.error('Neizdevās nokopēt saiti. Lūdzu, kopējiet manuāli.');
       }
     } catch (error) {
-      console.error('Error in handleCopyLink:', error);
       message.error('Neizdevās sagatavot saiti');
     } finally {
       setPreparingToSend(false);
@@ -573,7 +550,6 @@ const ViewInvoice = () => {
         if (saveError.errorFields) {
           message.error('Lūdzu, aizpildiet visus laukus');
         } else {
-          console.error('Error saving invoice:', saveError);
           message.error('Neizdevās saglabāt izmaiņas');
         }
         setPreparingToSend(false);
@@ -588,7 +564,6 @@ const ViewInvoice = () => {
       .eq('invoice_id', invoice.id);
 
     if (itemsCheckError) {
-      console.error('Error checking items:', itemsCheckError);
       message.error('Neizdevās pārbaudīt rēķina produktus');
       return;
     }
@@ -608,7 +583,6 @@ const ViewInvoice = () => {
         .update({ public_token: publicToken })
         .eq('id', invoice.id);
       if (tokenError) {
-        console.error('Error updating public token:', tokenError);
         message.error('Neizdevās sagatavot rēķinu');
         return;
       }
@@ -634,7 +608,6 @@ const ViewInvoice = () => {
           .eq('id', invoice.id);
         
         if (statusUpdateError) {
-          console.error('Error updating invoice status:', statusUpdateError);
           message.error('Neizdevās atjaunināt rēķina statusu');
           return;
         }
@@ -654,33 +627,22 @@ const ViewInvoice = () => {
                 stripe_payment_link: paymentLinkData.paymentUrl,
                 stripe_payment_link_id: paymentLinkData.paymentLinkId
               } : null);
-              console.log('Payment link updated in local state:', paymentLinkData.paymentUrl);
             } else {
               // If response doesn't have paymentUrl, refresh from database
               // The edge function should have saved it to the database
-              console.log('Refreshing invoice data to get payment link from database...');
               await fetchInvoiceData();
             }
           } catch (error) {
-            console.error('Error creating payment link:', error);
-            // Log the full error for debugging
-            if (error.message) {
-              console.error('Error message:', error.message);
-            }
-            if (error.details) {
-              console.error('Error details:', error.details);
-            }
             // Don't show error message to user - payment link creation happens in background
             // Try to refresh from database in case it was saved
             try {
               await fetchInvoiceData();
             } catch (fetchError) {
-              console.error('Error fetching invoice data:', fetchError);
+              // Error fetching invoice data
             }
           }
         }
       } catch (error) {
-        console.error('Error updating status:', error);
         // Don't show error - status update happens in background
       }
     })();
@@ -720,7 +682,6 @@ const ViewInvoice = () => {
           await fetchInvoiceData(); // Refresh invoice data to get the payment link
           setPreparingToSend(false);
         } catch (error) {
-          console.error('Error creating payment link:', error);
           message.error('Neizdevās izveidot maksājuma saiti. Rēķins netika nosūtīts.');
           setPreparingToSend(false);
           setSendingEmail(false);
@@ -742,27 +703,13 @@ const ViewInvoice = () => {
       // Get current session for authentication
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      console.log('Session check:', { 
-        hasSession: !!session, 
-        sessionError,
-        accessToken: session?.access_token ? 'Present' : 'Missing'
-      });
-      
       if (!session) {
-        console.error('No session found. Session error:', sessionError);
         throw new Error('Nav autentificēts. Lūdzu, pieslēdzieties atkārtoti.');
       }
       
       // Call Supabase Edge Function to send email
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, ''); // Remove trailing slash
       const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-invoice-email`;
-      
-      console.log('Calling edge function:', edgeFunctionUrl);
-      console.log('Request payload:', {
-        invoiceId: invoice.id,
-        customerEmail: invoice.customer_email,
-        invoiceNumber: invoice.invoice_number
-      });
       
       const response = await fetch(edgeFunctionUrl, {
         method: 'POST',
@@ -780,13 +727,9 @@ const ViewInvoice = () => {
           total: invoice.total
         }),
       });
-
-      console.log('Response status:', response.status, response.statusText);
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('Error response:', errorData);
-        console.error('Response status:', response.status);
         throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
@@ -802,9 +745,7 @@ const ViewInvoice = () => {
         })
         .eq('id', invoice.id);
       
-      if (updateError) {
-        console.error('Error updating invoice status:', updateError);
-      } else {
+        if (!updateError) {
         // Update local state instead of fetching to prevent modal flicker
         setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
       }
@@ -823,7 +764,6 @@ const ViewInvoice = () => {
       
       // Keep modal open - don't close it
     } catch (error) {
-      console.error('Error sending email:', error);
       message.error('Neizdevās nosūtīt e-pastu');
       
       // Still update status to 'sent' even if email fails
@@ -842,7 +782,7 @@ const ViewInvoice = () => {
           setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
         }
       } catch (statusError) {
-        console.error('Error updating status after email failure:', statusError);
+        // Error updating status after email failure
       }
     } finally {
       setSendingEmail(false);

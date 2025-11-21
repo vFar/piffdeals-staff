@@ -32,7 +32,6 @@ export const AuthProvider = ({ children }) => {
         .maybeSingle();
       
       if (error) {
-        console.error('Error fetching user profile:', error);
         setUserProfile(null);
         return;
       }
@@ -48,14 +47,11 @@ export const AuthProvider = ({ children }) => {
             .eq('id', userId);
         } catch (updateError) {
           // Silently fail if update fails (not critical)
-          console.warn('Failed to update last_login:', updateError);
         }
       } else {
-        console.warn('User profile not found for user:', userId);
         setUserProfile(null);
       }
     } catch (error) {
-      console.error('Error fetching user profile:', error);
       setUserProfile(null);
     }
   }, []);
@@ -72,19 +68,17 @@ export const AuthProvider = ({ children }) => {
 
     // Listen for changes on auth state (sign in, sign out, etc.)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, 'User ID:', session?.user?.id);
       setCurrentUser(session?.user ?? null);
       
       // Set loading to false immediately - don't wait for profile
       setLoading(false);
-      console.log('Auth loading set to false');
       
       // Fetch profile in background (non-blocking)
       if (session?.user) {
         // Use setTimeout to make it truly non-blocking
         setTimeout(() => {
-          fetchUserProfile(session.user.id).catch(err => {
-            console.error('Error fetching profile in auth state change:', err);
+          fetchUserProfile(session.user.id).catch(() => {
+            // Error fetching profile in auth state change
           });
         }, 0);
       } else {
@@ -99,18 +93,14 @@ export const AuthProvider = ({ children }) => {
    * Sign in with email and password
    */
   const signIn = async (email, password) => {
-    console.log('Signing in with email:', email);
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
     
     if (error) {
-      console.error('Sign in error:', error);
       throw error;
     }
-    
-    console.log('Sign in successful, user ID:', data.user?.id);
     
     // Profile will be fetched by auth state change listener
     // Don't fetch here to avoid blocking

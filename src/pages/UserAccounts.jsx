@@ -72,7 +72,6 @@ const UserAccounts = () => {
       setUsers(data || []);
       setFilteredUsers(data || []);
     } catch (error) {
-      console.error('Error fetching users:', error);
       message.error('Kļūda ielādējot lietotājus');
     } finally {
       if (initialLoad) {
@@ -136,13 +135,11 @@ const UserAccounts = () => {
         if (response.ok) {
           const result = await response.json();
           userId = result.userId;
-          console.log('User created successfully:', result);
         } else {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || 'Edge function returned an error');
-        }
+          throw new Error(errorData.error || 'Edge function returned an error'        );
+      }
       } catch (edgeError) {
-        console.error('Edge function error:', edgeError);
         throw new Error(
           'Kļūda sazināties ar serveri. Lūdzu, pārbaudiet savienojumu un mēģiniet vēlreiz.'
         );
@@ -156,7 +153,6 @@ const UserAccounts = () => {
       form.resetFields();
       fetchUsers();
     } catch (error) {
-      console.error('Error creating user:', error);
       message.error(error.message || 'Kļūda izveidojot lietotāju');
     } finally {
       setSubmitting(false);
@@ -197,7 +193,6 @@ const UserAccounts = () => {
       setSelectedRowKeys([]);
       fetchUsers();
     } catch (error) {
-      console.error('Error deleting users:', error);
       message.error('Kļūda dzēšot lietotājus');
     } finally {
       setBulkActionLoading(false);
@@ -228,7 +223,6 @@ const UserAccounts = () => {
       setSelectedRowKeys([]);
       fetchUsers();
     } catch (error) {
-      console.error('Error changing roles:', error);
       message.error('Kļūda maiņot lomas');
     } finally {
       setBulkActionLoading(false);
@@ -261,7 +255,6 @@ const UserAccounts = () => {
       // If no confirmation needed, proceed with update
       await performBulkStatusUpdate(status);
     } catch (error) {
-      console.error('Error changing status:', error);
       message.error('Kļūda maiņot statusu');
       setBulkActionLoading(false);
     }
@@ -281,7 +274,6 @@ const UserAccounts = () => {
       setSelectedRowKeys([]);
       fetchUsers();
     } catch (error) {
-      console.error('Error changing status:', error);
       message.error('Kļūda maiņot statusu');
       throw error;
     } finally {
@@ -360,8 +352,6 @@ const UserAccounts = () => {
         });
       }, 1000);
     } catch (error) {
-      console.error('Error sending password reset email:', error);
-      
       // Check if it's a cooldown error (429 status)
       if (error.status === 429 || error.message?.includes('Cooldown') || error.message?.includes('wait')) {
         // Try to extract cooldown from error message or response
@@ -480,7 +470,6 @@ const UserAccounts = () => {
       // If no confirmation needed, proceed with update
       await performUserUpdate(values);
     } catch (error) {
-      console.error('Error updating user:', error);
       message.error(error.message || 'Kļūda atjauninot lietotāju');
     } finally {
       setSubmitting(false);
@@ -508,7 +497,6 @@ const UserAccounts = () => {
       setEditingUser(null);
       fetchUsers();
     } catch (error) {
-      console.error('Error updating user:', error);
       message.error(error.message || 'Kļūda atjauninot lietotāju');
       throw error;
     }

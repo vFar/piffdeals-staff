@@ -26,8 +26,6 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
     
-    console.log(`Received Stripe webhook: ${event.type}`)
-    
     // Handle different event types
     switch (event.type) {
       case 'checkout.session.completed': {
@@ -41,13 +39,11 @@ serve(async (req) => {
             const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent)
             invoiceId = paymentIntent.metadata?.invoice_id
           } catch (err) {
-            console.warn('Could not retrieve payment intent:', err)
+            // Could not retrieve payment intent
           }
         }
         
         if (invoiceId) {
-          console.log(`Processing payment for invoice: ${invoiceId}`)
-          
           // Check current invoice status
           const { data: currentInvoice, error: fetchError } = await supabase
             .from('invoices')
@@ -56,7 +52,6 @@ serve(async (req) => {
             .single()
           
           if (fetchError) {
-            console.error('Error fetching invoice:', fetchError)
             throw fetchError
           }
           
@@ -72,17 +67,12 @@ serve(async (req) => {
             .eq('id', invoiceId)
           
           if (updateError) {
-            console.error('Error updating invoice:', updateError)
             throw updateError
           }
-          
-          console.log(`Invoice ${invoiceId} marked as paid`)
           
           // Trigger stock update in Mozello (only if not already completed)
           if (currentInvoice?.stock_update_status !== 'completed') {
             try {
-              console.log(`Calling update-mozello-stock for invoice ${invoiceId}`)
-              
               // Mark as pending first
               await supabase
                 .from('invoices')
@@ -100,7 +90,6 @@ serve(async (req) => {
               )
               
               if (stockError) {
-                console.error('Error updating stock:', stockError)
                 // Mark as failed
                 await supabase
                   .from('invoices')
@@ -111,7 +100,6 @@ serve(async (req) => {
               } else {
                 // Check if the function returned success
                 const success = stockData?.success !== false
-                console.log(`Stock update result for invoice ${invoiceId}:`, { success, data: stockData })
                 
                 await supabase
                   .from('invoices')
@@ -122,7 +110,6 @@ serve(async (req) => {
                   .eq('id', invoiceId)
               }
             } catch (stockUpdateError) {
-              console.error('Stock update error:', stockUpdateError)
               // Mark as failed but don't throw
               await supabase
                 .from('invoices')
@@ -131,11 +118,7 @@ serve(async (req) => {
                 })
                 .eq('id', invoiceId)
             }
-          } else {
-            console.log(`Stock already updated for invoice ${invoiceId}, skipping`)
           }
-        } else {
-          console.warn('No invoice_id found in webhook metadata')
         }
         break
       }
@@ -145,8 +128,6 @@ serve(async (req) => {
         const invoiceId = paymentIntent.metadata?.invoice_id
         
         if (invoiceId) {
-          console.log(`Processing payment_intent.succeeded for invoice: ${invoiceId}`)
-          
           // Check current invoice status
           const { data: currentInvoice, error: fetchError } = await supabase
             .from('invoices')
@@ -155,7 +136,6 @@ serve(async (req) => {
             .single()
           
           if (fetchError) {
-            console.error('Error fetching invoice:', fetchError)
             throw fetchError
           }
           
@@ -171,17 +151,12 @@ serve(async (req) => {
             .eq('id', invoiceId)
           
           if (updateError) {
-            console.error('Error updating invoice:', updateError)
             throw updateError
           }
-          
-          console.log(`Invoice ${invoiceId} marked as paid`)
           
           // Trigger stock update in Mozello (only if not already completed)
           if (currentInvoice?.stock_update_status !== 'completed') {
             try {
-              console.log(`Calling update-mozello-stock for invoice ${invoiceId}`)
-              
               // Mark as pending first
               await supabase
                 .from('invoices')
@@ -199,7 +174,6 @@ serve(async (req) => {
               )
               
               if (stockError) {
-                console.error('Error updating stock:', stockError)
                 // Mark as failed
                 await supabase
                   .from('invoices')
@@ -210,7 +184,6 @@ serve(async (req) => {
               } else {
                 // Check if the function returned success
                 const success = stockData?.success !== false
-                console.log(`Stock update result for invoice ${invoiceId}:`, { success, data: stockData })
                 
                 await supabase
                   .from('invoices')
@@ -221,7 +194,6 @@ serve(async (req) => {
                   .eq('id', invoiceId)
               }
             } catch (stockUpdateError) {
-              console.error('Stock update error:', stockUpdateError)
               // Mark as failed but don't throw
               await supabase
                 .from('invoices')
@@ -230,8 +202,6 @@ serve(async (req) => {
                 })
                 .eq('id', invoiceId)
             }
-          } else {
-            console.log(`Stock already updated for invoice ${invoiceId}, skipping`)
           }
         }
         break
@@ -242,7 +212,6 @@ serve(async (req) => {
         const invoiceId = session.metadata?.invoice_id
         
         if (invoiceId) {
-          console.log(`Payment failed for invoice: ${invoiceId}`)
           // Optionally update invoice with failure info
           await supabase
             .from('invoices')
@@ -256,7 +225,8 @@ serve(async (req) => {
       }
       
       default:
-        console.log(`Unhandled event type: ${event.type}`)
+        // Unhandled event type
+        break
     }
     
     return new Response(
@@ -267,7 +237,6 @@ serve(async (req) => {
       }
     )
   } catch (error) {
-    console.error('Webhook error:', error)
     return new Response(
       JSON.stringify({ 
         error: error.message || 'Webhook processing failed',

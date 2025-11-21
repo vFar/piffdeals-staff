@@ -11,17 +11,6 @@ import { Spin } from 'antd';
 const RoleRoute = ({ children, allowedRoles = [], redirectTo = '/dashboard' }) => {
   const { userProfile, loading, isAdmin, isSuperAdmin, isActive } = useUserRole();
 
-  // Debug logging
-  console.log('RoleRoute check:', {
-    hasProfile: !!userProfile,
-    profileRole: userProfile?.role,
-    allowedRoles,
-    isAdmin,
-    isSuperAdmin,
-    isActive,
-    loading,
-  });
-
   // Show loading spinner while checking role
   if (loading) {
     return (
@@ -39,7 +28,6 @@ const RoleRoute = ({ children, allowedRoles = [], redirectTo = '/dashboard' }) =
 
   // Check if user profile exists
   if (!userProfile) {
-    console.warn('RoleRoute: No user profile found');
     return <Navigate to={redirectTo} replace />;
   }
 
@@ -57,19 +45,12 @@ const RoleRoute = ({ children, allowedRoles = [], redirectTo = '/dashboard' }) =
   }
 
   if (!hasAccess) {
-    console.warn('RoleRoute: Access denied', {
-      profileRole: userProfile.role,
-      allowedRoles,
-      isAdmin,
-      isSuperAdmin,
-    });
     return <Navigate to={redirectTo} replace />;
   }
 
   // Check if user is active - allow inactive users to access (they can't login anyway)
   // Only block suspended users
   if (userProfile.status === 'suspended') {
-    console.warn('RoleRoute: User suspended', { status: userProfile.status });
     return <Navigate to="/account-suspended" replace />;
   }
 
@@ -77,7 +58,6 @@ const RoleRoute = ({ children, allowedRoles = [], redirectTo = '/dashboard' }) =
   // So if we reach here, user is either active or inactive (but will be signed out)
   // We allow access here and let ProtectedRoute handle the sign out
 
-  console.log('RoleRoute: Access granted');
   return children;
 };
 

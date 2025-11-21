@@ -26,7 +26,6 @@ const Login = () => {
   // Navigate to dashboard when user is authenticated
   useEffect(() => {
     if (currentUser) {
-      console.log('User authenticated, navigating to dashboard');
       navigate('/dashboard');
     }
   }, [currentUser, navigate]);
@@ -34,8 +33,6 @@ const Login = () => {
   const onFinish = async (values) => {
     setLoading(true);
     try {
-      console.log('Attempting login...');
-      
       // Handle remember me functionality
       if (values.remember) {
         localStorage.setItem('rememberedEmail', values.email);
@@ -65,7 +62,6 @@ const Login = () => {
       } catch (profileError) {
         // If we can't check profile, continue with login attempt
         // The ProtectedRoute will catch inactive users after login
-        console.warn('Could not check user profile before login:', profileError);
       }
       
       // Use Promise.race to add a timeout fallback
@@ -76,7 +72,6 @@ const Login = () => {
       
       try {
         await Promise.race([signInPromise, timeoutPromise]);
-        console.log('SignIn completed');
         
         // After successful login, verify user status and sign out if inactive/suspended
         const { data: { session } } = await supabase.auth.getSession();
@@ -122,7 +117,6 @@ const Login = () => {
               return;
             }
             
-            console.log('Login succeeded despite timeout, user:', session.user.id);
             message.success('Veiksmīgi pieslēdzies!');
             return; // Let useEffect handle navigation
           }
@@ -133,7 +127,6 @@ const Login = () => {
       message.success('Veiksmīgi pieslēdzies!');
       // Navigation will happen via useEffect when currentUser is set
     } catch (error) {
-      console.error('Login error:', error);
       setLoading(false);
       
       let errorMessage = 'Nepareizs e-pasts vai parole!';

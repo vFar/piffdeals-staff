@@ -36,7 +36,6 @@ serve(async (req) => {
       .not('due_date', 'is', null)
 
     if (selectError) {
-      console.error('Error selecting overdue invoices:', selectError)
       throw selectError
     }
 
@@ -68,11 +67,8 @@ serve(async (req) => {
       .select('id, invoice_number')
 
     if (updateError) {
-      console.error('Error updating invoices:', updateError)
       throw updateError
     }
-
-    console.log(`Marked ${updatedInvoices?.length || 0} invoices as overdue`)
 
     return new Response(
       JSON.stringify({
@@ -87,7 +83,6 @@ serve(async (req) => {
       }
     )
   } catch (error) {
-    console.error('Error marking overdue invoices:', error)
     return new Response(
       JSON.stringify({
         success: false,

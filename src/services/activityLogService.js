@@ -47,7 +47,6 @@ export const logActivity = async ({
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     
     if (userError || !user) {
-      console.warn('Cannot log activity: User not authenticated', userError);
       return { success: false, error: new Error('User not authenticated') };
     }
 
@@ -81,17 +80,13 @@ export const logActivity = async ({
       // If error is permission denied, it's expected for non-super-admins
       // We'll log it but not throw (activity logging should not break the main flow)
       if (error.code === '42501' || error.message?.includes('permission')) {
-        console.warn('Activity logging not available (permission denied):', error.message);
         return { success: false, error: new Error('Permission denied') };
       }
-      
-      console.error('Error logging activity:', error);
       return { success: false, error };
     }
 
     return { success: true, logId: data };
   } catch (error) {
-    console.error('Exception logging activity:', error);
     return { success: false, error };
   }
 };

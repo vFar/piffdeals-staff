@@ -79,7 +79,6 @@ export const createUser = async (userData) => {
       'Lietotāja izveide prasa servera piekļuvi. Lūdzu, iestatiet Supabase Edge Function vai backend API.'
     );
   } catch (error) {
-    console.error('Error creating user:', error);
     throw error;
   }
 };
@@ -123,7 +122,6 @@ export const createUserProfile = async (userId, profileData, createdBy = null) =
     if (insertError) throw insertError;
     return profile;
   } catch (error) {
-    console.error('Error creating user profile:', error);
     throw error;
   }
 };
@@ -171,7 +169,6 @@ export const sendPasswordResetEmail = async (userEmail, userName) => {
     }
     return data;
   } catch (error) {
-    console.error('Error sending password reset email:', error);
     throw error;
   }
 };

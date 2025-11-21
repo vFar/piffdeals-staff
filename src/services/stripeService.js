@@ -20,12 +20,6 @@ export const stripeService = {
       );
 
       if (error) {
-        console.error('=== STRIPE SERVICE ERROR ===');
-        console.error('Full error object:', error);
-        console.error('Error message:', error.message);
-        console.error('Error context:', error.context);
-        console.error('Error status:', error.status);
-        
         // Supabase functions.invoke error structure:
         // error.message - usually contains the error
         // error.context - may contain Response object with the actual error body
@@ -35,9 +29,6 @@ export const stripeService = {
         
         // Try to extract error from context (Response object)
         if (error.context) {
-          console.error('Error context type:', typeof error.context);
-          console.error('Error context:', error.context);
-          
           // If context is a Response object, read its body
           if (error.context instanceof Response || (error.context.status && error.context.text)) {
             try {
@@ -45,13 +36,11 @@ export const stripeService = {
               const response = error.context;
               if (response.text) {
                 const text = await response.text();
-                console.error('Error response body (text):', text);
                 try {
                   const body = JSON.parse(text);
                   if (body.error) {
                     errorMessage = body.error;
                     errorDetails = body.details || body.message;
-                    console.error('Extracted error from response body:', body);
                   }
                 } catch (e) {
                   // If not JSON, use the text as error message
@@ -61,7 +50,7 @@ export const stripeService = {
                 }
               }
             } catch (e) {
-              console.error('Could not read error response body:', e);
+              // Could not read error response body
             }
           } else if (error.context.body) {
             // Context has body property
@@ -72,17 +61,15 @@ export const stripeService = {
               if (body.error) {
                 errorMessage = body.error;
                 errorDetails = body.details;
-                console.error('Extracted error from context body:', body);
               }
             } catch (e) {
-              console.error('Could not parse error context body:', e);
+              // Could not parse error context body
             }
           }
         }
         
         // If data exists and contains error, use it (shouldn't happen with 500, but just in case)
         if (data?.error) {
-          console.error('Error in data response:', data);
           errorMessage = data.error;
           errorDetails = data.details;
         }
@@ -96,14 +83,8 @@ export const stripeService = {
       
       // Check if response contains an error (edge function returned 200 but with error field)
       if (data?.error) {
-        console.error('Error in response:', data);
         throw new Error(data.error + (data.details ? `: ${data.details}` : ''));
       }
-
-      // Log the response for debugging
-      console.log('Stripe payment link response:', data);
-      console.log('Response type:', typeof data);
-      console.log('Response keys:', data ? Object.keys(data) : 'null');
       
       // Handle different possible response structures
       // Supabase functions.invoke returns the JSON response directly
@@ -128,12 +109,11 @@ export const stripeService = {
           paymentUrl = parsed.payment_url || parsed.data?.payment_url;
           paymentLinkId = parsed.payment_link_id || parsed.data?.payment_link_id;
         } catch (e) {
-          console.error('Failed to parse string response:', e);
+          // Failed to parse string response
         }
       }
       
       if (!paymentUrl) {
-        console.error('No payment_url in response. Full response:', JSON.stringify(data, null, 2));
         // Don't throw error - let the database update handle it
         // The edge function should have saved it to the database
         // We'll refresh from database instead
@@ -145,7 +125,6 @@ export const stripeService = {
         paymentLinkId,
       };
     } catch (error) {
-      console.error('Error creating Stripe payment link:', error);
       throw error;
     }
   },

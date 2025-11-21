@@ -41,15 +41,6 @@ const CreateInvoice = ({ mode = 'create' }) => {
   const [templateName, setTemplateName] = useState('');
   const templateLoadedRef = useRef(false);
 
-  // Debug logging
-  useEffect(() => {
-    console.log('CreateInvoice mounted/updated:', {
-      mode,
-      editInvoiceNumber,
-      currentUser: currentUser ? 'exists' : 'null',
-      pathname: window.location.pathname
-    });
-  }, [mode, editInvoiceNumber, currentUser]);
 
   // Form state
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -87,7 +78,6 @@ const CreateInvoice = ({ mode = 'create' }) => {
       
       // Decode the invoice number in case it was URL encoded
       const decodedInvoiceNumber = decodeURIComponent(editInvoiceNumber);
-      console.log('Loading invoice for editing with number:', decodedInvoiceNumber);
       
       // Fetch invoice
       const { data: invoice, error: invoiceError } = await supabase
@@ -148,7 +138,6 @@ const CreateInvoice = ({ mode = 'create' }) => {
       setItems(loadedItems);
 
     } catch (error) {
-      console.error('Error loading invoice:', error);
       message.error('Neizdevās ielādēt rēķinu');
       navigate('/invoices');
     } finally {
@@ -235,7 +224,6 @@ const CreateInvoice = ({ mode = 'create' }) => {
       
       setAvailableProducts(purchasableProducts);
     } catch (error) {
-      console.error('Error loading products:', error);
       message.error('Neizdevās ielādēt produktus no veikala');
     } finally {
       setLoadingProducts(false);
@@ -370,26 +358,20 @@ const CreateInvoice = ({ mode = 'create' }) => {
         message.error('Aizpildiet visus obligātos laukus');
         return;
       }
-      console.error('Error saving template:', error);
       message.error('Neizdevās saglabāt paraugu');
     }
   };
 
   const handleSave = async () => {
-    console.log('handleSave called, mode:', mode);
-    
     // Validate items
     if (items.some(item => !item.name || item.price <= 0)) {
-      console.log('Items validation failed');
       message.error('Aizpildiet visus laukus');
       return;
     }
 
     try {
       // Trigger form validation - this will show red borders if validation fails
-      console.log('Validating form fields...');
       const values = await form.validateFields();
-      console.log('Form validation passed', values);
       
       setLoading(true);
 
@@ -482,12 +464,10 @@ const CreateInvoice = ({ mode = 'create' }) => {
     } catch (error) {
       if (error.errorFields) {
         // Form validation error - red borders and error messages are now shown below fields
-        console.log('Form validation errors:', error.errorFields);
         message.error('Aizpildiet visus laukus');
         return;
       }
       setLoading(false);
-      console.error('Error saving invoice:', error);
       message.error('Neizdevās saglabāt rēķinu');
     }
   };
@@ -639,8 +619,7 @@ const CreateInvoice = ({ mode = 'create' }) => {
                 issueDate: dayjs(),
               }}
               validateTrigger={['onBlur', 'onChange']}
-              onFinish={(values) => {
-                console.log('Form onFinish triggered with values:', values);
+              onFinish={() => {
               }}
             >
               {/* Header Section */}

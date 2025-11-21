@@ -17,7 +17,6 @@ serve(async (req) => {
     const MOZELLO_API_BASE = 'https://api.mozello.com/v1';
 
     if (!MOZELLO_API_KEY) {
-      console.error('MOZELLO_API_KEY not configured');
       return new Response(
         JSON.stringify({ error: 'MOZELLO_API_KEY not configured' }),
         {
@@ -26,8 +25,6 @@ serve(async (req) => {
         }
       );
     }
-
-    console.log('Fetching products from Mozello API...');
 
     // Fetch products from Mozello API
     const response = await fetch(`${MOZELLO_API_BASE}/store/products/`, {
@@ -39,7 +36,6 @@ serve(async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Mozello API error:', errorText);
       return new Response(
         JSON.stringify({ error: `Failed to fetch products from Mozello: ${response.status}` }),
         {
@@ -50,7 +46,6 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    console.log(`Fetched ${data.products?.length || 0} products from Mozello`);
 
     // Filter products to only show available ones
     const availableProducts = (data.products || []).filter((product: any) => {
@@ -72,8 +67,6 @@ serve(async (req) => {
       return true;
     });
 
-    console.log(`Returning ${availableProducts.length} available products`);
-
     return new Response(
       JSON.stringify({ products: availableProducts }),
       {
@@ -82,7 +75,6 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error in fetch-mozello-products function:', error);
     return new Response(
       JSON.stringify({ error: error.message || 'Internal server error' }),
       {

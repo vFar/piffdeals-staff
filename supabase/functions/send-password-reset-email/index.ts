@@ -15,16 +15,12 @@ interface PasswordResetEmailRequest {
 }
 
 serve(async (req) => {
-  console.log('Function invoked:', req.method);
-  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    console.log('Handling OPTIONS request');
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    console.log('Processing POST request');
     
     // Get Authorization header and apikey
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
@@ -218,15 +214,11 @@ serve(async (req) => {
     const origin = req.headers.get('Origin') || req.headers.get('origin') || '';
     const isDevelopment = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('://localhost:');
     
-    console.log('Origin header:', origin, 'isDevelopment:', isDevelopment);
-    
     // Use localhost for dev, otherwise use PUBLIC_SITE_URL
     const publicSiteUrlEnv = Deno.env.get('PUBLIC_SITE_URL') || 'http://localhost:5173';
     const publicSiteUrl = isDevelopment || publicSiteUrlEnv.includes('localhost') || publicSiteUrlEnv.includes('127.0.0.1')
       ? 'http://localhost:5173'
       : publicSiteUrlEnv.replace(/\/$/, '');
-    
-    console.log('Using publicSiteUrl:', publicSiteUrl);
 
     // Generate password reset token using admin API
     const { data: resetData, error: resetError } = await supabaseAdmin.auth.admin.generateLink({
@@ -238,7 +230,6 @@ serve(async (req) => {
     });
 
     if (resetError || !resetData) {
-      console.error('Error generating reset link:', resetError);
       return new Response(
         JSON.stringify({ error: 'Failed to generate password reset link' }),
         {
@@ -274,10 +265,7 @@ serve(async (req) => {
           throw new Error('Could not extract token from reset link');
         }
       }
-      
-      console.log('Reset password URL created for user:', userEmail);
     } catch (urlError) {
-      console.error('Error parsing reset link:', urlError);
       return new Response(
         JSON.stringify({ error: 'Failed to parse reset link' }),
         {
@@ -301,7 +289,6 @@ serve(async (req) => {
     const COMPANY_NAME = Deno.env.get('COMPANY_NAME') || 'Piffdeals';
 
     if (!RESEND_API_KEY) {
-      console.error('RESEND_API_KEY not set');
       return new Response(
         JSON.stringify({ error: 'Email service not configured' }),
         {
@@ -480,12 +467,10 @@ www.piffdeals.lv
 
     if (!emailResponse.ok) {
       const error = await emailResponse.text();
-      console.error('Resend API error:', error);
       throw new Error(`Failed to send email: ${error}`);
     }
 
     const emailData = await emailResponse.json();
-    console.log('Password reset email sent successfully:', emailData);
 
     // Update last_password_reset_sent timestamp
     await supabaseAdmin
@@ -538,7 +523,6 @@ www.piffdeals.lv
       });
       
       if (logError) {
-        console.error('Failed to log activity via RPC:', logError);
         // Try direct insert as fallback (service role should bypass RLS)
         try {
           await supabaseAdmin
@@ -563,16 +547,12 @@ www.piffdeals.lv
               ip_address: ipAddress,
               user_agent: userAgent,
             });
-          console.log('Activity logged via direct insert');
         } catch (directInsertError) {
-          console.error('Failed to log activity via direct insert:', directInsertError);
+          // Failed to log activity via direct insert
         }
-      } else {
-        console.log('Activity logged: password reset email sent');
       }
     } catch (logError) {
       // Don't fail the request if logging fails
-      console.error('Exception logging activity:', logError);
     }
 
     return new Response(
@@ -587,7 +567,6 @@ www.piffdeals.lv
       }
     );
   } catch (error) {
-    console.error('Error sending password reset email:', error);
     return new Response(
       JSON.stringify({
         error: 'Failed to send email',

@@ -11,11 +11,8 @@ export const mozelloService = {
    */
   async getProducts() {
     try {
-      console.log('Calling Edge Function: fetch-mozello-products');
-      
       // Get current session for auth
       const { data: { session } } = await supabase.auth.getSession();
-      console.log('Session exists:', !!session);
       
       if (!session) {
         throw new Error('Not authenticated - please log in');
@@ -34,20 +31,15 @@ export const mozelloService = {
         }
       );
       
-      console.log('Response status:', response.status);
-      
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Edge Function error:', errorText);
         throw new Error(`Edge Function returned ${response.status}: ${errorText}`);
       }
       
       const data = await response.json();
-      console.log(`Successfully fetched ${data.products?.length || 0} products`);
       
       return data;
     } catch (error) {
-      console.error('Error fetching Mozello products:', error);
       throw error;
     }
   },
@@ -70,7 +62,6 @@ export const mozelloService = {
       if (!response.ok) throw new Error('Failed to fetch product from Mozello');
       return await response.json();
     } catch (error) {
-      console.error('Error fetching Mozello product:', error);
       throw error;
     }
   },
@@ -91,7 +82,6 @@ export const mozelloService = {
       if (error) throw error;
       return data;
     } catch (error) {
-      console.error('Error updating Mozello stock:', error);
       throw error;
     }
   },

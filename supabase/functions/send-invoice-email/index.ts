@@ -25,19 +25,11 @@ serve(async (req) => {
   }
 
   try {
-    // Debug: Log request headers
-    console.log('Request method:', req.method);
-    console.log('Request headers:', Object.fromEntries(req.headers.entries()));
-    
     // Get Authorization header and apikey
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
     const apikeyHeader = req.headers.get('apikey') || req.headers.get('Apikey');
     
-    console.log('Authorization header:', authHeader ? 'Present' : 'Missing');
-    console.log('Apikey header:', apikeyHeader ? 'Present' : 'Missing');
-    
     if (!authHeader) {
-      console.error('No Authorization header found. Available headers:', Object.keys(Object.fromEntries(req.headers.entries())));
       return new Response(
         JSON.stringify({ error: 'Unauthorized: No authorization header' }),
         {
@@ -64,24 +56,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_KEY') ||
       apikeyHeader; // Fallback to apikey from header if env var not set
 
-    console.log('Environment check:', {
-      projectRef,
-      hasSupabaseUrl: !!supabaseUrl,
-      hasAnonKey: !!supabaseAnonKey,
-      supabaseUrl: supabaseUrl ? `${supabaseUrl.substring(0, 30)}...` : 'missing',
-      usingHeaderApikey: !Deno.env.get('SUPABASE_ANON_KEY') && !!apikeyHeader,
-    });
-
     if (!supabaseUrl || !supabaseAnonKey) {
-      console.error('Missing Supabase environment variables', {
-        projectRef,
-        requestUrl: req.url,
-        envVars: {
-          SUPABASE_URL: !!Deno.env.get('SUPABASE_URL'),
-          SUPABASE_ANON_KEY: !!Deno.env.get('SUPABASE_ANON_KEY'),
-          ANON_KEY: !!Deno.env.get('ANON_KEY'),
-        }
-      });
       return new Response(
         JSON.stringify({ 
           error: 'Server configuration error: Missing Supabase credentials',
@@ -133,14 +108,11 @@ serve(async (req) => {
       if (verifyResponse.ok) {
         const userData = await verifyResponse.json();
         user = userData;
-        console.log('Token verification via direct API call succeeded');
       } else {
         const errorText = await verifyResponse.text();
-        console.error('Token verification failed:', verifyResponse.status, errorText);
         userError = new Error(`Token verification failed: ${verifyResponse.status}`);
       }
     } catch (apiError) {
-      console.error('Error in direct API verification, trying client methods...', apiError);
       
       // Method 2: Fallback to client getUser
       const getUserResult = await supabaseClient.auth.getUser();
@@ -153,21 +125,11 @@ serve(async (req) => {
         if (sessionResult.data?.session?.user) {
           user = sessionResult.data.session.user;
           userError = null;
-          console.log('getSession succeeded as fallback');
         }
       }
     }
 
     if (userError || !user) {
-      console.error('Authentication failed:', {
-        error: userError?.message || 'Unknown error',
-        errorCode: userError?.status || 'Unknown',
-        errorStatus: userError?.status,
-        hasUser: !!user,
-        authHeaderPrefix: authHeader ? authHeader.substring(0, 30) : 'missing',
-        supabaseUrl: supabaseUrl ? `${supabaseUrl.substring(0, 30)}...` : 'missing',
-        hasAnonKey: !!supabaseAnonKey,
-      });
       return new Response(
         JSON.stringify({ 
           error: 'Unauthorized',
@@ -180,15 +142,85 @@ serve(async (req) => {
       );
     }
 
-    console.log('User authenticated:', user.id);
-
     // Parse request body
     const body: InvoiceEmailRequest = await req.json();
-    const { customerEmail, customerName, invoiceNumber, publicToken, total } = body;
+    const { invoiceId, customerEmail, customerName, invoiceNumber, publicToken, total } = body;
 
-    if (!customerEmail || !customerName || !invoiceNumber || !publicToken) {
+    if (!invoiceId || !customerEmail || !customerName || !invoiceNumber || !publicToken) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // SECURITY: Verify invoice ownership - only creator can send emails
+    const { data: invoice, error: invoiceError } = await supabaseClient
+      .from('invoices')
+      .select('id, user_id, status, public_token, customer_email, last_invoice_email_sent')
+      .eq('id', invoiceId)
+      .maybeSingle();
+
+    if (invoiceError || !invoice) {
+      return new Response(
+        JSON.stringify({ error: 'Invoice not found' }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Verify invoice belongs to requesting user (only creator can send)
+    if (invoice.user_id !== user.id) {
+      return new Response(
+        JSON.stringify({ error: 'Forbidden: You can only send emails for your own invoices' }),
+        {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // SECURITY: Rate limiting - prevent email spam (5 minutes cooldown)
+    if (invoice.last_invoice_email_sent) {
+      const lastSent = new Date(invoice.last_invoice_email_sent);
+      const now = new Date();
+      const minutesSinceLastSent = (now.getTime() - lastSent.getTime()) / (1000 * 60);
+      
+      if (minutesSinceLastSent < 5) {
+        const remainingMinutes = Math.ceil(5 - minutesSinceLastSent);
+        return new Response(
+          JSON.stringify({ 
+            error: 'Cooldown active',
+            message: `Please wait ${remainingMinutes} minute(s) before sending another email for this invoice.`,
+            cooldownRemaining: remainingMinutes * 60, // seconds
+          }),
+          {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
+    // Verify public token matches
+    if (invoice.public_token !== publicToken) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid public token' }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Verify customer email matches (prevents sending to wrong email)
+    if (invoice.customer_email && invoice.customer_email.toLowerCase() !== customerEmail.toLowerCase()) {
+      return new Response(
+        JSON.stringify({ error: 'Customer email mismatch' }),
         {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -225,12 +257,9 @@ serve(async (req) => {
         const logoBuffer = await logoResponse.arrayBuffer();
         const logoBase64String = arrayBufferToBase64(logoBuffer);
         logoBase64 = `data:image/png;base64,${logoBase64String}`;
-        console.log('Logo image fetched and converted to base64, size:', logoBase64String.length, 'chars');
-      } else {
-        console.warn('Failed to fetch logo image:', logoResponse.status, logoResponse.statusText);
       }
     } catch (error) {
-      console.error('Error fetching logo image:', error);
+      // Error fetching logo image
     }
     
     try {
@@ -241,23 +270,14 @@ serve(async (req) => {
         // SVG can be embedded as base64 (encode properly for UTF-8)
         const textLogoBase64String = btoa(unescape(encodeURIComponent(textLogoSvg)));
         textLogoBase64 = `data:image/svg+xml;base64,${textLogoBase64String}`;
-        console.log('Text logo fetched and converted to base64, size:', textLogoBase64String.length, 'chars');
-      } else {
-        console.warn('Failed to fetch text logo:', textLogoResponse.status, textLogoResponse.statusText);
       }
     } catch (error) {
-      console.error('Error fetching text logo:', error);
+      // Error fetching text logo
     }
     
     // Fallback to URLs if base64 conversion failed
     const finalLogoUrl = logoBase64 || logoImageUrl;
     const finalTextLogoUrl = textLogoBase64 || textLogoUrl;
-    
-    console.log('Image embedding status:', {
-      logoEmbedded: !!logoBase64,
-      textLogoEmbedded: !!textLogoBase64,
-      usingFallbackUrls: !logoBase64 || !textLogoBase64,
-    });
 
     // Send email using Resend (or your preferred email service)
     // You'll need to set RESEND_API_KEY in your Supabase Edge Function secrets
@@ -266,7 +286,6 @@ serve(async (req) => {
     const COMPANY_NAME = Deno.env.get('COMPANY_NAME') || 'Piffdeals';
 
     if (!RESEND_API_KEY) {
-      console.error('RESEND_API_KEY not set');
       return new Response(
         JSON.stringify({ error: 'Email service not configured' }),
         {
@@ -491,12 +510,39 @@ www.piffdeals.lv
 
     if (!emailResponse.ok) {
       const error = await emailResponse.text();
-      console.error('Resend API error:', error);
       throw new Error(`Failed to send email: ${error}`);
     }
 
     const emailData = await emailResponse.json();
-    console.log('Email sent successfully:', emailData);
+
+    // Update last_invoice_email_sent timestamp for rate limiting
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
+    await supabaseAdmin
+      .from('invoices')
+      .update({ last_invoice_email_sent: new Date().toISOString() })
+      .eq('id', invoiceId);
+
+    // Update invoice status to 'sent' if it's draft (only via RLS-checked update)
+    if (invoice.status === 'draft') {
+      await supabaseClient
+        .from('invoices')
+        .update({ 
+          status: 'sent',
+          sent_at: new Date().toISOString()
+        })
+        .eq('id', invoiceId)
+        .eq('user_id', user.id); // Extra ownership check
+    }
 
     return new Response(
       JSON.stringify({
@@ -510,7 +556,6 @@ www.piffdeals.lv
       }
     );
   } catch (error) {
-    console.error('Error sending invoice email:', error);
     return new Response(
       JSON.stringify({
         error: 'Failed to send email',

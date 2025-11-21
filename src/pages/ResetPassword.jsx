@@ -60,9 +60,6 @@ const ResetPassword = () => {
         if (!autoSession) {
           throw new Error('Nav derīga paroles maiņas saite vai tā ir beigusies');
         }
-        console.log('Using auto-created session from token');
-      } else {
-        console.log('Token verified, user authenticated:', verifyData?.user?.email);
       }
 
       // Verify we have a session now for the CORRECT user
@@ -70,8 +67,6 @@ const ResetPassword = () => {
       if (!finalSession || !finalSession.user) {
         throw new Error('Nav derīga paroles maiņas saite vai tā ir beigusies');
       }
-
-      console.log('Resetting password for user:', finalSession.user.email);
 
       // Update password for the authenticated user (the one from the token, not any previous session)
       const { error: updateError } = await supabase.auth.updateUser({
@@ -90,7 +85,6 @@ const ResetPassword = () => {
         navigate('/login');
       }, 2000);
     } catch (error) {
-      console.error('Password reset error:', error);
       let errorMessage = 'Kļūda mainot paroli!';
       
       const errorMsg = error?.message || '';

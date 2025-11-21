@@ -44,7 +44,6 @@ const ActivityLogs = () => {
       if (error) throw error;
       setLogs(data || []);
     } catch (error) {
-      console.error('Error fetching activity logs:', error);
       setLogs([]);
     } finally {
       setLoading(false);

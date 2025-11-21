@@ -37,13 +37,10 @@ serve(async (req) => {
       throw new Error('No items found for this invoice')
     }
     
-    console.log(`Updating stock for ${items.length} products...`)
-    
     // Update stock for each product in Mozello
     const updateResults = []
     for (const item of items) {
       if (!item.product_id) {
-        console.warn(`Skipping item "${item.product_name}" - no product_id`)
         continue
       }
       
@@ -56,9 +53,7 @@ serve(async (req) => {
           success: true,
           ...result,
         })
-        console.log(`✓ Updated stock for ${item.product_name} (${item.quantity} units)`)
       } catch (productError) {
-        console.error(`✗ Failed to update stock for ${item.product_name}:`, productError)
         updateResults.push({
           product_id: item.product_id,
           product_name: item.product_name,
@@ -96,7 +91,6 @@ serve(async (req) => {
       }
     )
   } catch (error) {
-    console.error('Error updating Mozello stock:', error)
     return new Response(
       JSON.stringify({ 
         error: error.message || 'Failed to update stock',
@@ -119,8 +113,6 @@ async function updateMozelloProductStock(productId: string, quantitySold: number
   if (!MOZELLO_API_KEY) {
     throw new Error('MOZELLO_API_KEY not configured')
   }
-
-  console.log(`Updating stock for product ${productId} - decreasing by ${quantitySold}`)
   
   // According to Mozello API docs:
   // - GET /store/product/<product-handle>/ (SINGULAR, not plural)
@@ -129,8 +121,6 @@ async function updateMozelloProductStock(productId: string, quantitySold: number
   // So if productId is "uid-4778688", we can use it directly as the handle
   
   const productHandle = productId // productId is already the handle (can be uid- format or slug)
-  
-  console.log(`Using product handle: ${productHandle}`)
   
   // Step 1: Get current product data
   // Mozello API uses SINGULAR: /store/product/<handle>/
@@ -144,13 +134,10 @@ async function updateMozelloProductStock(productId: string, quantitySold: number
   
   if (!getResponse.ok) {
     const errorText = await getResponse.text()
-    console.error(`Failed to get product ${productHandle}:`, errorText)
     throw new Error(`Failed to get product ${productHandle}: ${getResponse.status} ${errorText}`)
   }
   
   const productData = await getResponse.json()
-  
-  console.log(`Product data retrieved:`, JSON.stringify(productData, null, 2))
   
   // Step 2: Extract current stock from API response
   // Handle different response structures from Mozello API
@@ -160,24 +147,17 @@ async function updateMozelloProductStock(productId: string, quantitySold: number
   // Try different possible response structures
   if (productData.stock !== undefined) {
     currentStock = productData.stock
-    console.log(`Found stock at productData.stock: ${currentStock}`)
   } else if (productData.product?.stock !== undefined) {
     currentStock = productData.product.stock
-    console.log(`Found stock at productData.product.stock: ${currentStock}`)
   } else if (productData.data?.stock !== undefined) {
     currentStock = productData.data.stock
-    console.log(`Found stock at productData.data.stock: ${currentStock}`)
   } else {
     // Last resort: check if productData itself is the product object
-    console.warn(`Could not find stock in expected locations. Full response:`, JSON.stringify(productData, null, 2))
     throw new Error(`Could not extract stock from product data for ${productHandle}`)
   }
   
-  console.log(`Extracted current stock: ${currentStock} (type: ${typeof currentStock})`)
-  
   // If stock is null (unlimited), don't update
   if (currentStock === null || currentStock === undefined) {
-    console.log(`Product ${productHandle} has unlimited stock (null/undefined), skipping update`)
     return { message: 'Unlimited stock, no update needed' }
   }
   
@@ -190,18 +170,9 @@ async function updateMozelloProductStock(productId: string, quantitySold: number
   // Calculate new stock: subtract quantity sold from current stock
   const newStock = Math.max(0, currentStockNum - quantitySold)
   
-  console.log(`📊 Stock Calculation:`)
-  console.log(`   Product: ${productHandle}`)
-  console.log(`   Current stock: ${currentStockNum}`)
-  console.log(`   Quantity sold: ${quantitySold}`)
-  console.log(`   Calculation: ${currentStockNum} - ${quantitySold} = ${newStock}`)
-  console.log(`   New stock will be: ${newStock}`)
-  
   // Step 3: Update product with new stock
   // According to Mozello API docs: PUT /store/product/<product-handle>/
   // The request body should be: { "product": { "stock": newStock } }
-  console.log(`Updating product ${productHandle} stock to ${newStock}`)
-  
   const updateResponse = await fetch(`${MOZELLO_API_BASE}/store/product/${productHandle}/`, {
     method: 'PUT',
     headers: {
@@ -217,23 +188,16 @@ async function updateMozelloProductStock(productId: string, quantitySold: number
   
   if (!updateResponse.ok) {
     const errorText = await updateResponse.text()
-    console.error(`Failed to update stock for ${productHandle}:`, errorText)
     throw new Error(`Failed to update stock for ${productHandle}: ${updateResponse.status} ${errorText}`)
   }
   
   const updatedData = await updateResponse.json()
-  console.log(`✅ Successfully updated stock for product ${productHandle}`)
-  console.log(`   Previous stock: ${currentStockNum}`)
-  console.log(`   Quantity sold: ${quantitySold}`)
-  console.log(`   New stock: ${newStock}`)
-  console.log(`   Verification: ${currentStockNum} - ${quantitySold} = ${newStock} ✓`)
   
   // Verify the update was successful by checking the response
   const updatedStock = updatedData.stock ?? updatedData.product?.stock
   if (updatedStock !== undefined && updatedStock !== null) {
-    console.log(`   API confirmed new stock: ${updatedStock}`)
     if (Number(updatedStock) !== newStock) {
-      console.warn(`   ⚠️ WARNING: Expected stock ${newStock} but API returned ${updatedStock}`)
+      // Expected stock mismatch - but continue anyway
     }
   }
   

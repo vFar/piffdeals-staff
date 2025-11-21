@@ -390,6 +390,89 @@ But this makes queries and reports harder.
     AND due_date IS NOT NULL;
   ```
 
+## Setup & Deployment
+
+### Environment Variables
+
+**Frontend (.env.local):**
+```env
+VITE_SUPABASE_URL=https://your-project-id.supabase.co
+VITE_SUPABASE_ANON_KEY=your_anon_key_here
+VITE_STRIPE_PUBLISHABLE_KEY=pk_test_your_publishable_key_here
+VITE_MOZELLO_API_URL=https://api.mozello.com/v1
+VITE_MOZELLO_API_KEY=your_mozello_api_key_here
+```
+
+**Supabase Edge Function Secrets:**
+Set these in Supabase Dashboard → Edge Functions → Manage secrets:
+```env
+STRIPE_SECRET_KEY=sk_test_your_secret_key_here
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
+MOZELLO_API_KEY=your_mozello_api_key_here
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+RESEND_API_KEY=re_xxxxx...
+FROM_EMAIL=noreply@yourdomain.com
+COMPANY_NAME=Piffdeals
+PUBLIC_SITE_URL=https://staff.piffdeals.lv
+FRONTEND_URL=https://staff.piffdeals.lv
+```
+
+### Supabase Edge Functions
+
+The project uses 9 Edge Functions that must be deployed:
+
+1. **create-user** - Creates user accounts with authentication
+2. **create-stripe-payment-link** - Generates Stripe payment links for invoices
+3. **send-invoice-email** - Sends invoice emails via Resend
+4. **send-password-reset-email** - Handles password reset emails
+5. **stripe-webhook** - Processes Stripe payment webhooks
+6. **update-mozello-stock** - Updates product stock in Mozello when invoice is paid
+7. **fetch-mozello-products** - Fetches products from Mozello API
+8. **mark-overdue-invoices** - Daily cron job to mark overdue invoices
+9. **delete-old-drafts** - Daily cron job to delete draft invoices older than 3 days
+
+**Deployment Steps:**
+1. Install Supabase CLI: `npm install -g supabase`
+2. Login: `supabase login`
+3. Link project: `supabase link --project-ref YOUR_PROJECT_REF`
+4. Set secrets: `supabase secrets set KEY=value`
+5. Deploy functions: `supabase functions deploy FUNCTION_NAME`
+
+### Key Integrations
+
+**Stripe Payment Processing:**
+- Payment links automatically generated when invoices are sent
+- Webhook updates invoice status when payment is received
+- Supports Latvian language and Baltic payment methods
+- Test mode and live mode supported
+
+**Mozello E-commerce Integration:**
+- Products fetched directly from Mozello API (not stored in database)
+- Stock automatically updated when invoices are paid
+- Only visible and in-stock products shown in product selector
+
+**Resend Email Service:**
+- Sends branded invoice emails to customers
+- High deliverability with domain verification
+- Free tier: 3,000 emails/month
+- Recommended FROM email: `info@piffdeals.lv`
+
+### Deployment
+
+**Frontend (Vercel):**
+- Framework: Vite + React
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variables must be set in Vercel dashboard
+- Custom domain: `staff.piffdeals.lv`
+
+**Database:**
+- PostgreSQL via Supabase
+- Required tables: `user_profiles`, `invoices`, `invoice_items`
+- Optional tables: `customers`, `activity_logs`
+- Row Level Security (RLS) enabled for data protection
+
 ## Future Development Considerations
 
 - Invoice templates

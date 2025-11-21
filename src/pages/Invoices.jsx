@@ -137,7 +137,6 @@ const Invoices = () => {
       setInvoices(enrichedInvoices);
       setFilteredInvoices(enrichedInvoices);
     } catch (error) {
-      console.error('Error fetching invoices:', error);
       message.error('Neizdevās ielādēt rēķinus');
     } finally {
       if (initialLoad) {
@@ -187,13 +186,11 @@ const Invoices = () => {
         .select();
 
       if (error) {
-        console.error('Delete error details:', error);
         throw error;
       }
 
       // Check if any rows were actually deleted
       if (!data || data.length === 0) {
-        console.error('No rows deleted - possible RLS policy issue');
         message.error('Neizdevās dzēst rēķinu. Pārbaudiet, vai rēķins ir melnraksts un vai jums ir tiesības to dzēst.');
         return;
       }
@@ -201,7 +198,6 @@ const Invoices = () => {
       message.success('Rēķins veiksmīgi dzēsts');
       fetchInvoices();
     } catch (error) {
-      console.error('Error deleting invoice:', error);
       const errorMessage = error?.message || 'Neizdevās dzēst rēķinu';
       message.error(errorMessage);
     }
@@ -243,27 +239,13 @@ const Invoices = () => {
       // Get current session for authentication
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      console.log('Session check:', { 
-        hasSession: !!session, 
-        sessionError,
-        accessToken: session?.access_token ? 'Present' : 'Missing'
-      });
-      
       if (!session) {
-        console.error('No session found. Session error:', sessionError);
         throw new Error('Nav autentificēts. Lūdzu, pieslēdzieties atkārtoti.');
       }
       
       // Call Supabase Edge Function to send email
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, ''); // Remove trailing slash
       const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-invoice-email`;
-      
-      console.log('Calling edge function:', edgeFunctionUrl);
-      console.log('Request payload:', {
-        invoiceId: currentInvoice.id,
-        customerEmail: currentInvoice.customer_email,
-        invoiceNumber: currentInvoice.invoice_number
-      });
       
       const response = await fetch(edgeFunctionUrl, {
         method: 'POST',
@@ -281,13 +263,9 @@ const Invoices = () => {
           total: currentInvoice.total
         }),
       });
-
-      console.log('Response status:', response.status, response.statusText);
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('Error response:', errorData);
-        console.error('Response status:', response.status);
         throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
@@ -304,9 +282,7 @@ const Invoices = () => {
           })
           .eq('id', invoiceId);
         
-        if (updateError) {
-          console.error('Error updating invoice status:', updateError);
-        } else {
+        if (!updateError) {
           // Update selectedInvoice to reflect new status without closing modal
           setSelectedInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
           // Also update in invoices list to keep data in sync
@@ -330,7 +306,6 @@ const Invoices = () => {
       
       // Keep modal open - don't close it
     } catch (error) {
-      console.error('Error sending email:', error);
       const errorMessage = error.message || 'Nezināma kļūda';
       message.error(`Neizdevās nosūtīt e-pastu: ${errorMessage}`);
       
@@ -338,9 +313,6 @@ const Invoices = () => {
       if (selectedInvoice) {
         notifyEmailSendFailed(selectedInvoice, errorMessage);
       }
-      
-      // Log full error for debugging
-      console.error('Full error details:', error);
       
       // Still update status to 'sent' even if email fails (for resend scenarios)
       if (currentInvoice.status !== 'sent') {
@@ -365,7 +337,7 @@ const Invoices = () => {
             ));
           }
         } catch (statusError) {
-          console.error('Error updating status after email failure:', statusError);
+          // Error updating status after email failure
         }
       }
     } finally {
@@ -396,7 +368,6 @@ const Invoices = () => {
           // TODO: Trigger stock update in Mozello
           // This should call your edge function to update stock
         } catch (error) {
-          console.error('Error marking invoice as paid:', error);
           message.error('Neizdevās atjaunināt rēķinu');
         }
   };
@@ -452,7 +423,6 @@ const Invoices = () => {
         setLinkCopied(false);
       }, 500); // Small delay to show the success message
     } catch (error) {
-      console.error('Error copying to clipboard:', error);
       message.error('Neizdevās nokopēt saiti. Lūdzu, kopējiet manuāli.');
     }
   };
@@ -592,11 +562,9 @@ const Invoices = () => {
             icon: <EditOutlined />,
             label: 'Rediģēt',
             onClick: () => {
-              console.log('Navigating to edit invoice:', record.invoice_number);
               // URL encode the invoice number to handle special characters like #
               const encodedInvoiceNumber = encodeURIComponent(record.invoice_number);
               const path = `/invoices/edit/${encodedInvoiceNumber}`;
-              console.log('Navigation path:', path);
               navigate(path);
             },
             style: { fontWeight: 600, color: '#0068FF' },
@@ -665,11 +633,9 @@ const Invoices = () => {
             icon: <EyeOutlined />,
             label: 'Skatīt',
             onClick: () => {
-              console.log('Navigating to invoice:', record.invoice_number);
               // URL encode the invoice number to handle special characters like #
               const encodedInvoiceNumber = encodeURIComponent(record.invoice_number);
               const path = `/invoice/${encodedInvoiceNumber}`;
-              console.log('Navigation path:', path);
               navigate(path);
             },
           });

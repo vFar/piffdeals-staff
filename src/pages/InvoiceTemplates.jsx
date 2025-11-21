@@ -46,7 +46,6 @@ const InvoiceTemplates = () => {
       if (error) throw error;
       setTemplates(data || []);
     } catch (error) {
-      console.error('Error fetching templates:', error);
       message.error('Neizdevās ielādēt paraugus');
     } finally {
       setLoading(false);
@@ -89,7 +88,6 @@ const InvoiceTemplates = () => {
       setTemplateToDelete(null);
       fetchTemplates();
     } catch (error) {
-      console.error('Error deleting template:', error);
       message.error('Neizdevās izdzēst paraugu');
     }
   };
@@ -122,7 +120,6 @@ const InvoiceTemplates = () => {
       setEditingTemplate(null);
       fetchTemplates();
     } catch (error) {
-      console.error('Error updating template:', error);
       message.error('Neizdevās atjaunināt paraugu');
     }
   };

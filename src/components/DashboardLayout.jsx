@@ -60,7 +60,7 @@ const DashboardLayout = ({ children }) => {
         localStorage.setItem('isAdmin', String(isAdmin));
         setCachedIsAdmin(isAdmin);
       } catch (error) {
-        console.warn('Failed to cache admin status:', error);
+        // Failed to cache admin status
       }
     }
   }, [isAdmin, roleLoading]);
@@ -169,7 +169,6 @@ const DashboardLayout = ({ children }) => {
         total: invoiceResults.length + userResults.length,
       });
     } catch (error) {
-      console.error('Search error:', error);
       setSearchResults({ invoices: [], users: [], total: 0 });
     } finally {
       setIsSearching(false);
@@ -387,14 +386,13 @@ const DashboardLayout = ({ children }) => {
         try {
           localStorage.removeItem('isAdmin');
         } catch (error) {
-          console.warn('Failed to clear admin cache:', error);
+          // Failed to clear admin cache
         }
         
         await signOut();
         message.success('Veiksmīgi atslēdzies');
         navigate('/login');
       } catch (error) {
-        console.error('Logout error:', error);
         message.error('Kļūda atslēdzoties');
       }
     } else if (key === 'profile') {
