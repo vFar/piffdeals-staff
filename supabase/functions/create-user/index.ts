@@ -87,6 +87,35 @@ serve(async (req) => {
       throw new Error('Invalid status');
     }
 
+    // Check for duplicate email in user_profiles
+    const normalizedEmail = email.toLowerCase().trim();
+    const { data: existingProfile, error: profileCheckError } = await supabaseAdmin
+      .from('user_profiles')
+      .select('email')
+      .eq('email', normalizedEmail)
+      .limit(1);
+
+    if (profileCheckError) {
+      throw new Error('Error checking for existing user');
+    }
+
+    if (existingProfile && existingProfile.length > 0) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'User with this email already exists',
+          errorCode: 'DUPLICATE_EMAIL',
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 409, // Conflict status code
+        }
+      );
+    }
+
+    // Note: We also check for duplicate emails in auth.users by catching errors
+    // from Supabase Auth when creating the user (see error handling below)
+
     // SECURITY: Verify user permissions - check creator's role
     if (!creatorProfile) {
       // If creator can't be verified, only allow creating employees (safety fallback)
@@ -134,7 +163,7 @@ serve(async (req) => {
 
     // Step 1: Create user in Supabase Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
+      email: normalizedEmail,
       password,
       email_confirm: true, // Auto-confirm email
       user_metadata: {
@@ -143,6 +172,27 @@ serve(async (req) => {
     });
 
     if (authError) {
+      // Check if error is due to duplicate email
+      const errorMessage = authError.message || '';
+      if (
+        errorMessage.includes('already registered') ||
+        errorMessage.includes('already exists') ||
+        errorMessage.includes('User already registered') ||
+        errorMessage.includes('duplicate') ||
+        authError.status === 422
+      ) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'User with this email already exists',
+            errorCode: 'DUPLICATE_EMAIL',
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 409, // Conflict status code
+          }
+        );
+      }
       throw authError;
     }
 
@@ -153,7 +203,7 @@ serve(async (req) => {
       .from('user_profiles')
       .insert({
         id: userId,
-        email,
+        email: normalizedEmail,
         username,
         role,
         status,
@@ -163,6 +213,27 @@ serve(async (req) => {
     if (profileError) {
       // If profile creation fails, clean up auth user
       await supabaseAdmin.auth.admin.deleteUser(userId);
+      
+      // Check if error is due to duplicate email (unique constraint violation)
+      const errorMessage = profileError.message || '';
+      if (
+        errorMessage.includes('duplicate') ||
+        errorMessage.includes('unique') ||
+        errorMessage.includes('already exists') ||
+        profileError.code === '23505' // PostgreSQL unique violation error code
+      ) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'User with this email already exists',
+            errorCode: 'DUPLICATE_EMAIL',
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 409, // Conflict status code
+          }
+        );
+      }
       throw profileError;
     }
 
@@ -179,10 +250,31 @@ serve(async (req) => {
       }
     );
   } catch (error) {
+    // Check if error is due to duplicate email
+    const errorMessage = error.message || '';
+    if (
+      errorMessage.includes('already registered') ||
+      errorMessage.includes('already exists') ||
+      errorMessage.includes('duplicate') ||
+      errorMessage.includes('unique')
+    ) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'User with this email already exists',
+          errorCode: 'DUPLICATE_EMAIL',
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 409, // Conflict status code
+        }
+      );
+    }
+
     return new Response(
       JSON.stringify({
         success: false,
-        error: error.message,
+        error: error.message || 'An error occurred while creating the user',
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

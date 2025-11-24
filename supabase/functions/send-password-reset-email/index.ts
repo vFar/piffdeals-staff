@@ -1,5 +1,18 @@
 // Send Password Reset Email Edge Function
 // Sends password reset link to user via email
+//
+// To deploy:
+// 1. Install Supabase CLI: npm install -g supabase
+// 2. Login: supabase login
+// 3. Link project: supabase link --project-ref your-project-ref
+// 4. Deploy: supabase functions deploy send-password-reset-email
+//
+// Environment variables needed (set in Supabase Dashboard → Edge Functions → Secrets):
+// - SUPABASE_SERVICE_ROLE_KEY
+// - RESEND_API_KEY
+// - FROM_EMAIL (optional, defaults to noreply@example.com)
+// - COMPANY_NAME (optional, defaults to Piffdeals)
+// - PUBLIC_SITE_URL (optional, defaults to http://localhost:5173)
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
@@ -181,33 +194,8 @@ serve(async (req) => {
       }
     );
 
-    // Check cooldown - prevent spam (10 minutes)
-    const { data: profileData, error: profileCheckError } = await supabaseAdmin
-      .from('user_profiles')
-      .select('last_password_reset_sent')
-      .eq('email', userEmail.toLowerCase())
-      .maybeSingle();
-
-    if (!profileCheckError && profileData?.last_password_reset_sent) {
-      const lastSent = new Date(profileData.last_password_reset_sent);
-      const now = new Date();
-      const minutesSinceLastSent = (now.getTime() - lastSent.getTime()) / (1000 * 60);
-      
-      if (minutesSinceLastSent < 10) {
-        const remainingMinutes = Math.ceil(10 - minutesSinceLastSent);
-        return new Response(
-          JSON.stringify({ 
-            error: 'Cooldown active',
-            message: `Please wait ${remainingMinutes} minute(s) before sending another password reset email.`,
-            cooldownRemaining: remainingMinutes * 60, // seconds
-          }),
-          {
-            status: 429,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
-      }
-    }
+    // Cooldown disabled - allow immediate resends
+    // (Cooldown check removed as requested)
 
     // Detect if we're in development mode
     // Check the Origin header from the request to determine if we should use localhost
@@ -466,11 +454,41 @@ www.piffdeals.lv
     });
 
     if (!emailResponse.ok) {
-      const error = await emailResponse.text();
-      throw new Error(`Failed to send email: ${error}`);
+      const errorText = await emailResponse.text();
+      let errorData: any = {};
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        errorData = { error: errorText };
+      }
+      
+      console.error('Resend API error:', {
+        status: emailResponse.status,
+        statusText: emailResponse.statusText,
+        error: errorData,
+      });
+      
+      return new Response(
+        JSON.stringify({
+          error: 'Failed to send email',
+          message: errorData.message || errorData.error || `Resend API error: ${emailResponse.status}`,
+          details: errorData,
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     const emailData = await emailResponse.json();
+    
+    // Log successful email send
+    console.log('Email sent successfully:', {
+      emailId: emailData.id,
+      to: userEmail,
+      from: FROM_EMAIL,
+    });
 
     // Update last_password_reset_sent timestamp
     await supabaseAdmin

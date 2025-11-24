@@ -713,12 +713,20 @@ const CreateInvoice = ({ mode = 'create' }) => {
                       <div style={{ fontSize: 14, fontWeight: 500, color: '#111827', marginBottom: 8 }}>
                         Apmaksas termiņš
                       </div>
-                      <Input
-                        value={calculateDueDate(getCurrentIssueDate()).format('DD.MM.YYYY')}
-                        disabled
-                        style={{ background: '#f3f4f6', color: '#6b7280' }}
-                        suffix={<span style={{ fontSize: 12, color: '#9ca3af' }}>(+5 dienas)</span>}
-                      />
+                      <Form.Item shouldUpdate={(prevValues, currentValues) => prevValues.issueDate !== currentValues.issueDate}>
+                        {({ getFieldValue }) => {
+                          const issueDate = getFieldValue('issueDate') || dayjs();
+                          const dueDate = calculateDueDate(issueDate);
+                          return (
+                            <Input
+                              value={dueDate.format('DD.MM.YYYY')}
+                              disabled
+                              style={{ background: '#f3f4f6', color: '#6b7280' }}
+                              suffix={<span style={{ fontSize: 12, color: '#9ca3af' }}>(+5 dienas)</span>}
+                            />
+                          );
+                        }}
+                      </Form.Item>
                     </div>
                   </div>
                 </div>

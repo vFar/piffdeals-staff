@@ -90,6 +90,15 @@ export const AuthProvider = ({ children }) => {
   }, [fetchUserProfile]);
 
   /**
+   * Sign out
+   */
+  const signOut = useCallback(async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+    setUserProfile(null);
+  }, []);
+
+  /**
    * Sign in with email and password (via rate-limited Edge Function)
    */
   const signIn = async (email, password) => {
@@ -99,8 +108,14 @@ export const AuthProvider = ({ children }) => {
       throw new Error('Missing Supabase URL');
     }
 
+    // In development, route through proxy to avoid CORS issues
+    const isDev = import.meta.env.DEV;
+    const baseUrl = isDev 
+      ? `${window.location.origin}/supabase-api`
+      : supabaseUrl;
+
     // Call rate-limited login Edge Function
-    const response = await fetch(`${supabaseUrl}/functions/v1/rate-limited-login`, {
+    const response = await fetch(`${baseUrl}/functions/v1/rate-limited-login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -154,15 +169,6 @@ export const AuthProvider = ({ children }) => {
     
     if (error) throw error;
     return data;
-  };
-
-  /**
-   * Sign out
-   */
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    setUserProfile(null);
   };
 
   /**

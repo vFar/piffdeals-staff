@@ -60,12 +60,14 @@ const Login = () => {
   }, [currentUser, navigate]);
 
   const onFinish = async (values) => {
-    const email = values.email.toLowerCase();
+    // Trim whitespaces from email input
+    const trimmedEmail = values.email.trim();
+    const email = trimmedEmail.toLowerCase();
     setLoading(true);
     try {
       // Handle remember me functionality
       if (values.remember) {
-        localStorage.setItem('rememberedEmail', values.email);
+        localStorage.setItem('rememberedEmail', trimmedEmail);
       } else {
         localStorage.removeItem('rememberedEmail');
       }
@@ -75,7 +77,7 @@ const Login = () => {
         const { data: profileData } = await supabase
           .from('user_profiles')
           .select('status, email')
-          .eq('email', values.email.toLowerCase())
+          .eq('email', email)
           .maybeSingle();
         
         if (profileData) {
@@ -95,7 +97,7 @@ const Login = () => {
       }
       
       // Use Promise.race to add a timeout fallback
-      const signInPromise = signIn(values.email, values.password);
+      const signInPromise = signIn(trimmedEmail, values.password);
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Login timeout')), 5000)
       );
@@ -314,6 +316,7 @@ const Login = () => {
         >
           <Form.Item
             name="email"
+            normalize={(value) => value?.trim() || value}
             rules={[
               { required: true, message: 'Lūdzu, ievadiet e-pastu!' },
               { type: 'email', message: 'Lūdzu, ievadiet derīgu e-pastu!' }

@@ -7,14 +7,51 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables. Please check your .env file.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
-    storageKey: 'piffdeals-auth',
-  },
-});
+// In development, route requests through Vite proxy to avoid CORS issues
+const isDev = import.meta.env.DEV;
+
+// Custom fetch function that routes through proxy in development
+const customFetch = isDev 
+  ? (url, options = {}) => {
+      // Extract URL from Request object or use string directly
+      let targetUrl = typeof url === 'string' ? url : (url instanceof Request ? url.url : url);
+      
+      // Replace Supabase URL with proxy URL for all Supabase API requests
+      if (typeof targetUrl === 'string' && targetUrl.includes(supabaseUrl)) {
+        const proxiedUrl = targetUrl.replace(supabaseUrl, `${window.location.origin}/supabase-api`);
+        
+        // If it was a Request object, create a new Request with the proxied URL
+        if (url instanceof Request) {
+          return fetch(new Request(proxiedUrl, url));
+        }
+        
+        // Otherwise, just use the proxied URL
+        return fetch(proxiedUrl, options);
+      }
+      
+      // Pass through non-Supabase requests
+      return fetch(url, options);
+    }
+  : undefined;
+
+export const supabase = createClient(
+  supabaseUrl, // Always use the real URL for client initialization
+  supabaseAnonKey, 
+  {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true,
+      storageKey: 'piffdeals-auth',
+      flowType: 'pkce', // Use PKCE flow for better security and CORS handling
+    },
+    ...(customFetch && {
+      global: {
+        fetch: customFetch,
+      },
+    }),
+  }
+);
 
 // Export URL and key for edge function calls
 supabase.supabaseUrl = supabaseUrl;

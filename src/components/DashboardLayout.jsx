@@ -53,6 +53,16 @@ const DashboardLayout = ({ children }) => {
     }
   });
 
+  // Cache super admin status in localStorage to prevent flicker on refresh
+  const [cachedIsSuperAdmin, setCachedIsSuperAdmin] = useState(() => {
+    try {
+      const cached = localStorage.getItem('isSuperAdmin');
+      return cached === 'true';
+    } catch {
+      return false;
+    }
+  });
+
   // Update cache when isAdmin changes and loading is complete
   useEffect(() => {
     if (!roleLoading) {
@@ -64,6 +74,18 @@ const DashboardLayout = ({ children }) => {
       }
     }
   }, [isAdmin, roleLoading]);
+
+  // Update cache when isSuperAdmin changes and loading is complete
+  useEffect(() => {
+    if (!roleLoading) {
+      try {
+        localStorage.setItem('isSuperAdmin', String(isSuperAdmin));
+        setCachedIsSuperAdmin(isSuperAdmin);
+      } catch (error) {
+        // Failed to cache super admin status
+      }
+    }
+  }, [isSuperAdmin, roleLoading]);
 
   // Global search function - Role-based: employees see only invoices/customers, admins see everything
   const performSearch = useCallback(async (query) => {
@@ -289,7 +311,7 @@ const DashboardLayout = ({ children }) => {
   // Use cached admin status for instant display, update when real status loads
   const menuItems = useMemo(() => {
     const shouldShowAdmin = roleLoading ? cachedIsAdmin : isAdmin;
-    const shouldShowSuperAdmin = roleLoading ? false : isSuperAdmin;
+    const shouldShowSuperAdmin = roleLoading ? cachedIsSuperAdmin : isSuperAdmin;
     
     return [
       {
@@ -330,7 +352,7 @@ const DashboardLayout = ({ children }) => {
         label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Iestatījumi</span>,
       },
     ];
-  }, [isAdmin, isSuperAdmin, roleLoading, cachedIsAdmin]);
+  }, [isAdmin, isSuperAdmin, roleLoading, cachedIsAdmin, cachedIsSuperAdmin]);
 
   // Get the selected menu key based on current pathname
   const getSelectedKey = () => {
@@ -385,6 +407,7 @@ const DashboardLayout = ({ children }) => {
         // Clear cached admin status on logout
         try {
           localStorage.removeItem('isAdmin');
+          localStorage.removeItem('isSuperAdmin');
         } catch (error) {
           // Failed to clear admin cache
         }

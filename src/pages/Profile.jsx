@@ -68,35 +68,60 @@ const Profile = () => {
     try {
       setDeletingAccount(true);
 
-      // Verify password
-      const { error: verifyError } = await supabase.auth.signInWithPassword({
-        email: userProfile.email,
-        password: values.password,
-      });
-
-      if (verifyError) {
-        messageApi.error('Nepareiza parole');
+      // Get the current session token
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        messageApi.error('Nav derīgas sesijas');
         setDeletingAccount(false);
         return;
       }
 
-      // Delete user profile from database
-      const { error: deleteError } = await supabase
-        .from('user_profiles')
-        .delete()
-        .eq('id', userProfile.id);
+      // Call the delete-user edge function to delete the auth user
+      // This will cascade delete the user_profile due to ON DELETE CASCADE
+      const { data, error: deleteError } = await supabase.functions.invoke('delete-user', {
+        body: {
+          userId: userProfile.id,
+          password: values.password,
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
 
-      if (deleteError) throw deleteError;
+      if (deleteError) {
+        // Handle specific error messages
+        if (deleteError.message?.includes('Invalid password') || deleteError.message?.includes('Nepareiza parole')) {
+          messageApi.error('Nepareiza parole');
+        } else if (deleteError.message?.includes('Invalid or expired token')) {
+          messageApi.error('Sesija beigusies. Lūdzu, piesakieties vēlreiz.');
+        } else {
+          messageApi.error(deleteError.message || 'Kļūda dzēšot kontu');
+        }
+        setDeletingAccount(false);
+        return;
+      }
 
-      // Sign out user (this will also trigger cascade delete in auth.users)
-      await signOut();
+      if (!data?.success) {
+        messageApi.error(data?.error || 'Kļūda dzēšot kontu');
+        setDeletingAccount(false);
+        return;
+      }
+
+      // Sign out user (may fail if user already deleted, but that's okay)
+      try {
+        await signOut();
+      } catch (signOutError) {
+        // User is already deleted, so sign out might fail - that's expected
+        console.log('Sign out after deletion (expected to potentially fail):', signOutError);
+      }
 
       messageApi.success('Konts veiksmīgi izdzēsts');
       
       // Navigate to login
       navigate('/login');
     } catch (error) {
-      messageApi.error('Kļūda dzēšot kontu');
+      console.error('Error deleting account:', error);
+      messageApi.error(error?.message || 'Kļūda dzēšot kontu');
       setDeletingAccount(false);
     }
   };

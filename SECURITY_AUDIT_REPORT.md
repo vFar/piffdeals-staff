@@ -197,3 +197,4 @@ Before deployment, manually test:
 - RLS policies provide good database-level security
 - Edge functions need more comprehensive validation
 
+

@@ -13,23 +13,36 @@ const ResetPassword = () => {
   const { updatePassword } = useAuth();
   const { message: messageApi } = App.useApp();
 
-  // Get token from URL (check both query params and hash)
+  // Get token and type from URL (check both query params and hash)
   const token = searchParams.get('token') || 
     (window.location.hash ? new URLSearchParams(window.location.hash.substring(1)).get('access_token') : null) ||
     (window.location.hash ? new URLSearchParams(window.location.hash.substring(1)).get('token') : null);
+  
+  const tokenType = searchParams.get('type') || 'recovery';
 
-  // Navigate to login if no token
+  // Security: Only allow access if user has a valid reset token
+  // If user is already logged in without a token, redirect them away
   useEffect(() => {
-    if (!token) {
-      // Check if Supabase has already processed the token and created a session
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (!session) {
-          messageApi.warning('Nav derīga paroles maiņas saite');
-          navigate('/login');
+    const checkAccess = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      // If there's no token in the URL
+      if (!token) {
+        // If user is already logged in (has an existing session), redirect them
+        // This prevents logged-in users from accessing the reset password page
+        if (session) {
+          navigate('/dashboard', { replace: true });
+          return;
         }
-      });
-    }
-  }, [token, navigate, messageApi]);
+        // If no session and no token, redirect to login
+        navigate('/login', { replace: true });
+      }
+      // If there's a token, allow access (even if user has a session, 
+      // they might be using a reset link which will sign them out first)
+    };
+    
+    checkAccess();
+  }, [token, navigate]);
 
   const onFinish = async (values) => {
     if (values.password !== values.confirmPassword) {
@@ -92,6 +105,8 @@ const ResetPassword = () => {
         errorMessage = 'Nav derīga paroles maiņas saite vai tā ir beigusies';
       } else if (errorMsg.includes('weak')) {
         errorMessage = 'Parole ir pārāk vāja. Lūdzu, izmantojiet stiprāku paroli';
+      } else if (errorMsg.includes('New password should be different') || errorMsg.includes('should be different')) {
+        errorMessage = 'Jaunajai parolei jābūt atšķirīgai no pašreizējās paroles';
       }
       
       messageApi.error(errorMessage, 5);

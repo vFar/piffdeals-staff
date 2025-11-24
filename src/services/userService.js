@@ -132,43 +132,87 @@ export const createUserProfile = async (userId, profileData, createdBy = null) =
  */
 export const sendPasswordResetEmail = async (userEmail, userName) => {
   try {
-    // Call the edge function to send password reset email
-    const { data, error } = await supabase.functions.invoke('send-password-reset-email', {
-      body: {
+    // Use EXACT same pattern as create-user which works
+    // Direct URL, no proxy, no apikey header
+    const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-password-reset-email`;
+    
+    // Get the current session to pass auth token
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    const response = await fetch(edgeFunctionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
         userEmail,
         userName,
-      },
+      }),
     });
 
-    if (error) {
+    if (response.ok) {
+      const result = await response.json();
+      return result;
+    } else {
+      // Handle errors - same pattern as create-user
+      let errorData = {};
+      try {
+        errorData = await response.json();
+      } catch (parseError) {
+        // If JSON parsing fails, try to get text
+        const text = await response.text().catch(() => '');
+        errorData = { error: text || 'Unknown error' };
+      }
+      
       // Check if it's a cooldown error (429 status)
-      if (error.status === 429) {
-        // Try to parse the error response body for cooldown info
-        let errorData = {};
-        try {
-          if (error.context?.body) {
-            errorData = error.context.body;
-          } else if (error.message) {
-            try {
-              const parsed = JSON.parse(error.message);
-              errorData = parsed;
-            } catch (e) {
-              // Not JSON, use as-is
-            }
-          }
-        } catch (e) {
-          // If parsing fails, use the error message as-is
-        }
-        
-        const customError = new Error(errorData.message || error.message || 'Please wait before sending another email');
+      if (response.status === 429) {
+        const customError = new Error(errorData.message || 'Please wait before sending another email');
         customError.status = 429;
-        customError.context = { body: errorData };
+        customError.context = errorData;
         throw customError;
       }
+      
+      // Handle other errors
+      const error = new Error(errorData.message || errorData.error || 'Failed to send password reset email');
+      error.status = response.status;
       throw error;
     }
-    return data;
+
+    if (response.ok) {
+      const result = await response.json();
+      return result;
+    } else {
+      // Handle errors - same pattern as create-user
+      let errorData = {};
+      try {
+        errorData = await response.json();
+      } catch (parseError) {
+        // If JSON parsing fails, try to get text
+        const text = await response.text().catch(() => '');
+        errorData = { error: text || 'Unknown error' };
+      }
+      
+      // Check if it's a cooldown error (429 status)
+      if (response.status === 429) {
+        const customError = new Error(errorData.message || 'Please wait before sending another email');
+        customError.status = 429;
+        customError.context = errorData;
+        throw customError;
+      }
+      
+      // Handle other errors
+      const error = new Error(errorData.message || errorData.error || 'Failed to send password reset email');
+      error.status = response.status;
+      throw error;
+    }
   } catch (error) {
+    // Re-throw with more context if it's a network error
+    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+      const networkError = new Error('Tīkla kļūda. Pārbaudiet interneta savienojumu vai Supabase pieejamību.');
+      networkError.originalError = error;
+      throw networkError;
+    }
     throw error;
   }
 };

@@ -99,18 +99,25 @@ const Dashboard = () => {
         const currentRange = monthRanges.current;
         const lastRange = monthRanges.last;
 
-        // Build invoice query based on role
-        let invoiceQuery = supabase
+        // Fetch ALL invoices for sales metrics and sales chart (global data)
+        const { data: allInvoices, error: invoicesError } = await supabase
           .from('invoices')
           .select('*');
 
-        if (!isAdminUser) {
-          invoiceQuery = invoiceQuery.eq('user_id', userId);
-        }
-
-        const { data: allInvoices, error: invoicesError } = await invoiceQuery;
-
         if (invoicesError) throw invoicesError;
+
+        // For employees: fetch their own invoices for pie chart and latest invoices table
+        let employeeInvoices = [];
+        if (!isAdminUser) {
+          const { data: empInvoices, error: empError } = await supabase
+            .from('invoices')
+            .select('*')
+            .eq('user_id', userId);
+          
+          if (!empError && empInvoices) {
+            employeeInvoices = empInvoices;
+          }
+        }
 
         // Calculate current month income (only paid invoices)
         const currentMonthPaid = allInvoices?.filter(inv => {
@@ -182,7 +189,10 @@ const Dashboard = () => {
           ? ((currentUnpaid - lastUnpaid) / lastUnpaid) * 100
           : (currentUnpaid > 0 ? 100 : 0);
 
-        // Calculate invoice status distribution for pie chart (for employees)
+        // Calculate invoice status distribution for pie chart
+        // For employees: use only their own invoices
+        // For admins: use all invoices
+        const invoicesForStatusChart = isAdminUser ? allInvoices : employeeInvoices;
         const invoiceStatusCounts = {
           paid: 0,
           sent: 0,
@@ -192,7 +202,7 @@ const Dashboard = () => {
           cancelled: 0,
         };
 
-        allInvoices?.forEach(inv => {
+        invoicesForStatusChart?.forEach(inv => {
           if (invoiceStatusCounts.hasOwnProperty(inv.status)) {
             invoiceStatusCounts[inv.status]++;
           }
@@ -255,7 +265,10 @@ const Dashboard = () => {
         }
 
         // Fetch latest 5 invoices
-        const latestInvoices = allInvoices
+        // For employees: show only their own invoices
+        // For admins: show all invoices
+        const invoicesForTable = isAdminUser ? allInvoices : employeeInvoices;
+        const latestInvoices = invoicesForTable
           ?.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
           .slice(0, 5)
           .map(inv => ({

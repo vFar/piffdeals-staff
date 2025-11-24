@@ -27,7 +27,7 @@ const UserAccounts = () => {
   const [editForm] = Form.useForm();
   const [passwordResetCooldown, setPasswordResetCooldown] = useState(0);
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
-  const { message: messageApi } = App.useApp();
+  const { message: messageApi, modal } = App.useApp();
 
   useEffect(() => {
     if (isAdmin || isSuperAdmin) {
@@ -88,7 +88,8 @@ const UserAccounts = () => {
 
       // Role-based permission check
       if (isAdmin && !isSuperAdmin && values.role !== 'employee') {
-        message.error('Administrators var izveidot tikai darbinieku kontus');
+        messageApi.error('Administrators var izveidot tikai darbinieku kontus');
+        setSubmitting(false);
         return;
       }
 
@@ -104,7 +105,8 @@ const UserAccounts = () => {
       }
 
       if (existingUsers && existingUsers.length > 0) {
-        message.error('Lietotājs ar šo e-pastu jau eksistē');
+        messageApi.error('Lietotājs ar šo e-pastu jau eksistē');
+        setSubmitting(false);
         return;
       }
 
@@ -136,10 +138,46 @@ const UserAccounts = () => {
           const result = await response.json();
           userId = result.userId;
         } else {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || 'Edge function returned an error'        );
-      }
+          let errorData = {};
+          try {
+            errorData = await response.json();
+          } catch (parseError) {
+            // If JSON parsing fails, try to get text
+            const text = await response.text().catch(() => '');
+            errorData = { error: text || 'Unknown error' };
+          }
+          
+          console.log('Edge function error response:', {
+            status: response.status,
+            errorData,
+            statusText: response.statusText
+          });
+          
+          // Check if it's a duplicate email error
+          if (response.status === 409 || 
+              errorData.errorCode === 'DUPLICATE_EMAIL' || 
+              errorData.error?.includes('already exists') || 
+              errorData.error?.includes('already registered') ||
+              errorData.error?.includes('duplicate') ||
+              errorData.error?.toLowerCase().includes('email')) {
+            throw new Error('Lietotājs ar šo e-pastu jau eksistē');
+          }
+          
+          throw new Error(errorData.error || errorData.message || 'Edge function returned an error');
+        }
       } catch (edgeError) {
+        // Check if it's already a duplicate email error message
+        if (edgeError.message === 'Lietotājs ar šo e-pastu jau eksistē') {
+          throw edgeError;
+        }
+        
+        // Check if the error message contains duplicate email indicators
+        if (edgeError.message?.includes('already exists') || 
+            edgeError.message?.includes('already registered') ||
+            edgeError.message?.includes('duplicate')) {
+          throw new Error('Lietotājs ar šo e-pastu jau eksistē');
+        }
+        
         throw new Error(
           'Kļūda sazināties ar serveri. Lūdzu, pārbaudiet savienojumu un mēģiniet vēlreiz.'
         );
@@ -148,12 +186,32 @@ const UserAccounts = () => {
       // Edge Function creates both auth user AND profile, so we're done!
       // No need to create profile here - it's already created by the Edge Function
 
-      message.success('Lietotājs veiksmīgi izveidots');
+      messageApi.success('Lietotājs veiksmīgi izveidots');
       setIsModalOpen(false);
       form.resetFields();
       fetchUsers();
     } catch (error) {
-      message.error(error.message || 'Kļūda izveidojot lietotāju');
+      console.error('Error creating user:', error);
+      
+      // Show error message - check if it's a duplicate email error
+      const errorMessage = error.message || String(error) || 'Kļūda izveidojot lietotāju';
+      console.log('Error message to display:', errorMessage);
+      
+      // Determine the error message to show
+      let displayMessage = errorMessage;
+      if (errorMessage.includes('Lietotājs ar šo e-pastu jau eksistē') || 
+          errorMessage.toLowerCase().includes('already exists') ||
+          errorMessage.toLowerCase().includes('already registered') ||
+          errorMessage.toLowerCase().includes('duplicate') ||
+          errorMessage.toLowerCase().includes('email')) {
+        displayMessage = 'Lietotājs ar šo e-pastu jau eksistē';
+      }
+      
+      // Show error message using messageApi
+      messageApi.error(displayMessage);
+      
+      // Don't close the modal on error - let user see the error and try again
+      // Keep submitting state false so user can retry
     } finally {
       setSubmitting(false);
     }
@@ -178,22 +236,58 @@ const UserAccounts = () => {
         
         if (hasHigherRoleUsers) {
           message.error('Administrators nevar dzēst citus administratorus');
+          setBulkActionLoading(false);
           return;
         }
       }
 
-      const { error } = await supabase
-        .from('user_profiles')
-        .delete()
-        .in('id', selectedRowKeys);
+      // Call the edge function to delete users from both auth and database
+      const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-user`;
+      
+      // Get the current session to pass auth token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          userIds: selectedRowKeys,
+        }),
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        let errorData = {};
+        try {
+          errorData = await response.json();
+        } catch (parseError) {
+          const text = await response.text().catch(() => '');
+          errorData = { error: text || 'Unknown error' };
+        }
+        
+        throw new Error(errorData.error || errorData.message || 'Kļūda dzēšot lietotājus');
+      }
 
-      message.success(`${selectedRowKeys.length} lietotāji veiksmīgi izdzēsti`);
-      setSelectedRowKeys([]);
-      fetchUsers();
+      const result = await response.json();
+      
+      if (result.success) {
+        if (result.errors && result.errors.length > 0) {
+          // Partial success
+          message.warning(`${result.deletedUserIds?.length || 0} lietotāji izdzēsti, ${result.errors.length} neizdevās`);
+        } else {
+          // Full success
+          message.success(`${result.deletedUserIds?.length || selectedRowKeys.length} lietotāji veiksmīgi izdzēsti`);
+        }
+        setSelectedRowKeys([]);
+        fetchUsers();
+      } else {
+        throw new Error(result.error || 'Kļūda dzēšot lietotājus');
+      }
     } catch (error) {
-      message.error('Kļūda dzēšot lietotājus');
+      console.error('Error deleting users:', error);
+      message.error(error.message || 'Kļūda dzēšot lietotājus');
     } finally {
       setBulkActionLoading(false);
     }
@@ -234,18 +328,67 @@ const UserAccounts = () => {
     try {
       setBulkActionLoading(true);
 
-      // If changing to suspended, show confirmation
+      // Get selected users to check permissions
+      const selectedUsers = users.filter((u) => selectedRowKeys.includes(u.id));
+
+      // Check if trying to change FROM suspended - only super_admin can do this
+      if (status !== 'suspended') {
+        const hasSuspendedUsers = selectedUsers.some((u) => u.status === 'suspended');
+        if (hasSuspendedUsers && !isSuperAdmin) {
+          message.error('Tikai galvenais administrators var mainīt aizliegtu lietotāju statusu');
+          setBulkActionLoading(false);
+          return;
+        }
+      }
+
+      // If changing to suspended, check permissions and show confirmation
       if (status === 'suspended') {
-        Modal.confirm({
-          title: 'Vai tiešām vēlaties bloķēt izvēlētos lietotājus?',
-          content: `${selectedRowKeys.length} lietotāji vairs nevarēs pieslēgties sistēmai. ${!isSuperAdmin ? 'Tikai galvenais administrators varēs atbloķēt šos kontus.' : ''}`,
+        // Check if trying to suspend any super_admin accounts - NOBODY can suspend super_admin
+        const hasSuperAdminUsers = selectedUsers.some((u) => u.role === 'super_admin');
+        if (hasSuperAdminUsers) {
+          message.error('Nevar bloķēt galvenā administratora kontus');
+          setBulkActionLoading(false);
+          return;
+        }
+
+        // Permission checks based on current user role
+        if (isAdmin && !isSuperAdmin) {
+          // Admins can only suspend employees
+          const hasNonEmployeeUsers = selectedUsers.some((u) => u.role !== 'employee');
+          if (hasNonEmployeeUsers) {
+            message.error('Administrators var bloķēt tikai darbiniekus');
+            setBulkActionLoading(false);
+            return;
+          }
+        }
+        // Super_admins can suspend employees and admins (but not super_admins - already checked above)
+        
+        // Show confirmation, then proceed with update (same as active/inactive)
+        console.log('Bulk: Showing confirmation modal for suspension');
+        console.log('Bulk: Selected users:', selectedUsers.map(u => ({ id: u.id, role: u.role, status: u.status })));
+        console.log('Bulk: Selected row keys:', selectedRowKeys);
+        
+        modal.confirm({
+          title: `Vai tiešām vēlaties bloķēt ${selectedRowKeys.length === 1 ? 'izvēlēto lietotāju' : 'izvēlētos lietotājus'}?`,
+          content: `${selectedRowKeys.length} ${selectedRowKeys.length === 1 ? 'lietotājs' : 'lietotāji'} vairs nevarēs pieslēgties. ${!isSuperAdmin ? 'Tikai galvenais administrators varēs atbloķēt šos kontus.' : ''}`,
           okText: 'Jā, bloķēt',
           cancelText: 'Atcelt',
           okButtonProps: { danger: true },
           onOk: async () => {
-            await performBulkStatusUpdate(status);
+            console.log('Bulk: User clicked OK in confirmation modal');
+            console.log('Bulk: About to call performBulkStatusUpdate with status:', status);
+            console.log('Bulk: Selected row keys at modal OK:', selectedRowKeys);
+            
+            try {
+              await performBulkStatusUpdate(status);
+              console.log('Bulk: performBulkStatusUpdate completed successfully');
+            } catch (error) {
+              console.error('Bulk: Error in performBulkStatusUpdate from modal:', error);
+              // Don't rethrow - let performBulkStatusUpdate handle the error display
+            }
           },
           onCancel: () => {
+            console.log('Bulk: User cancelled suspension');
             setBulkActionLoading(false);
           }
         });
@@ -262,19 +405,51 @@ const UserAccounts = () => {
 
   // Perform the actual bulk status update
   const performBulkStatusUpdate = async (status) => {
+    console.log('=== performBulkStatusUpdate START ===');
+    console.log('Status:', status);
+    console.log('Selected row keys:', selectedRowKeys);
+    console.log('Is super admin:', isSuperAdmin);
+    console.log('Is admin:', isAdmin);
+    
     try {
-      const { error } = await supabase
+      console.log('About to call Supabase update...');
+      
+      const { data, error } = await supabase
         .from('user_profiles')
         .update({ status })
-        .in('id', selectedRowKeys);
+        .in('id', selectedRowKeys)
+        .select();
+      
+      console.log('Supabase update completed');
+      console.log('Response data:', data);
+      console.log('Response error:', error);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Database error updating status:', error);
+        console.error('Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        throw error;
+      }
 
-      message.success(`${selectedRowKeys.length} lietotāju statusi veiksmīgi mainīti`);
+      // Check if any rows were actually updated
+      if (!data || data.length === 0) {
+        console.warn('No rows updated. This might be an RLS policy issue.');
+        message.error('Nav atjaunināti lietotāji. Pārbaudiet atļaujas vai izvēlētos lietotājus.');
+        return;
+      }
+
+      console.log('Successfully updated users:', data);
+      message.success(`${data.length} lietotāju statusi veiksmīgi mainīti`);
       setSelectedRowKeys([]);
       fetchUsers();
     } catch (error) {
-      message.error('Kļūda maiņot statusu');
+      console.error('Error in performBulkStatusUpdate:', error);
+      const errorMessage = error.message || error.details || error.hint || 'Kļūda maiņot statusu';
+      message.error(`Kļūda: ${errorMessage}`);
       throw error;
     } finally {
       setBulkActionLoading(false);
@@ -396,12 +571,16 @@ const UserAccounts = () => {
     try {
       setSubmitting(true);
 
-      if (!editingUser) return;
+      if (!editingUser) {
+        setSubmitting(false);
+        return;
+      }
 
       // Status-based permission check
       // Only super_admin can change status FROM "suspended"
       if (editingUser.status === 'suspended' && values.status !== 'suspended' && !isSuperAdmin) {
         message.error('Tikai galvenais administrators var mainīt aizliegtu lietotāju statusu');
+        setSubmitting(false);
         return;
       }
 
@@ -452,19 +631,51 @@ const UserAccounts = () => {
         }
       }
 
-      // If changing status to "suspended", show confirmation
+      // If changing status to "suspended", check permissions and show confirmation
       if (values.status === 'suspended' && editingUser.status !== 'suspended') {
-        Modal.confirm({
-          title: 'Vai tiešām vēlaties bloķēt šo lietotāju?',
-          content: `Lietotājs "${editingUser.username}" vairs nevarēs pieslēgties sistēmai. ${!isSuperAdmin ? 'Tikai galvenais administrators varēs atbloķēt šo kontu.' : ''}`,
-          okText: 'Jā, bloķēt',
-          cancelText: 'Atcelt',
-          okButtonProps: { danger: true },
-          onOk: async () => {
-            await performUserUpdate(values);
-          },
+        // Check if trying to suspend super_admin - NOBODY can suspend super_admin
+        if (editingUser.role === 'super_admin') {
+          message.error('Nevar bloķēt galvenā administratora kontu');
+          setSubmitting(false);
+          return;
+        }
+
+        // Permission checks based on current user role
+        if (isAdmin && !isSuperAdmin) {
+          // Admins can only suspend employees
+          if (editingUser.role !== 'employee') {
+            message.error('Administrators var bloķēt tikai darbiniekus');
+            setSubmitting(false);
+            return;
+          }
+        }
+        // Super_admins can suspend employees and admins (but not super_admins - already checked above)
+
+        // Show confirmation modal - return a promise that resolves when user confirms
+        return new Promise((resolve) => {
+          modal.confirm({
+            title: 'Vai tiešām vēlaties bloķēt šo lietotāju?',
+            content: `Lietotājs "${editingUser.username}" vairs nevarēs pieslēgties. ${!isSuperAdmin ? 'Tikai galvenais administrators varēs atbloķēt šo kontu.' : ''}`,
+            okText: 'Jā, bloķēt',
+            cancelText: 'Atcelt',
+            okButtonProps: { danger: true },
+            onOk: async () => {
+              console.log('Edit modal: User confirmed suspension, calling performUserUpdate');
+              try {
+                await performUserUpdate(values);
+                resolve();
+              } catch (error) {
+                console.error('Edit modal: Error in performUserUpdate:', error);
+                resolve(); // Resolve anyway to allow form to complete
+              }
+            },
+            onCancel: () => {
+              console.log('Edit modal: User cancelled suspension');
+              setSubmitting(false);
+              resolve(); // Resolve to allow form to complete
+            }
+          });
         });
-        return; // Exit early, confirmation will handle the update
       }
 
       // If no confirmation needed, proceed with update
@@ -479,7 +690,14 @@ const UserAccounts = () => {
   // Perform the actual user update
   const performUserUpdate = async (values) => {
     try {
-      const { error } = await supabase
+      console.log('performUserUpdate called with:', {
+        userId: editingUser.id,
+        values,
+        isSuperAdmin,
+        isAdmin
+      });
+
+      const { data, error } = await supabase
         .from('user_profiles')
         .update({
           username: values.name,
@@ -487,17 +705,38 @@ const UserAccounts = () => {
           role: values.role,
           status: values.status,
         })
-        .eq('id', editingUser.id);
+        .eq('id', editingUser.id)
+        .select();
 
-      if (error) throw error;
+      console.log('Update response:', { data, error });
 
+      if (error) {
+        console.error('Database error updating user:', error);
+        console.error('Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        throw error;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn('No rows updated in performUserUpdate. This might be an RLS policy issue.');
+        message.error('Nav atjaunināti lietotāja dati. Pārbaudiet atļaujas.');
+        return;
+      }
+
+      console.log('Successfully updated user:', data[0]);
       message.success('Lietotāja dati veiksmīgi atjaunināti');
       setIsEditModalOpen(false);
       editForm.resetFields();
       setEditingUser(null);
       fetchUsers();
     } catch (error) {
-      message.error(error.message || 'Kļūda atjauninot lietotāju');
+      console.error('Error in performUserUpdate:', error);
+      const errorMessage = error.message || error.details || error.hint || 'Kļūda atjauninot lietotāju';
+      message.error(`Kļūda: ${errorMessage}`);
       throw error;
     }
   };
@@ -1070,7 +1309,6 @@ const UserAccounts = () => {
             >
               <Option value="employee">Darbinieks</Option>
               {isSuperAdmin && <Option value="admin">Administrators</Option>}
-              {isSuperAdmin && <Option value="super_admin">Galvenais administrators</Option>}
             </Select>
           </Form.Item>
 
@@ -1190,26 +1428,35 @@ const UserAccounts = () => {
 
           {/* Password Reset Button */}
           <Form.Item style={{ marginBottom: '24px', marginTop: '24px' }}>
-            <Button
-              type="default"
-              icon={<MailOutlined />}
-              onClick={handleSendPasswordReset}
-              loading={submitting}
+            <Popconfirm
+              title="Nosūtīt paroles maiņas e-pastu?"
+              description={`Paroles maiņas e-pasts tiks nosūtīts uz ${editingUser?.email || 'lietotāja e-pastu'}. Vai turpināt?`}
+              onConfirm={handleSendPasswordReset}
+              okText="Jā, nosūtīt"
+              cancelText="Atcelt"
+              okButtonProps={{ loading: submitting }}
               disabled={passwordResetCooldown > 0}
-              block
-              style={{
-                height: '40px',
-                borderRadius: '8px',
-                borderColor: '#0068FF',
-                color: '#0068FF',
-                fontWeight: 500,
-                fontSize: '14px',
-              }}
             >
-              {passwordResetCooldown > 0
-                ? `Lūdzu, uzgaidiet ${Math.ceil(passwordResetCooldown / 60)} min`
-                : 'Nosūtīt paroles maiņas e-pastu'}
-            </Button>
+              <Button
+                type="default"
+                icon={<MailOutlined />}
+                loading={submitting}
+                disabled={passwordResetCooldown > 0}
+                block
+                style={{
+                  height: '40px',
+                  borderRadius: '8px',
+                  borderColor: '#0068FF',
+                  color: '#0068FF',
+                  fontWeight: 500,
+                  fontSize: '14px',
+                }}
+              >
+                {passwordResetCooldown > 0
+                  ? `Lūdzu, uzgaidiet ${Math.ceil(passwordResetCooldown / 60)} min`
+                  : 'Nosūtīt paroles maiņas e-pastu'}
+              </Button>
+            </Popconfirm>
             {passwordResetCooldown > 0 && (
               <div style={{ 
                 marginTop: '8px', 

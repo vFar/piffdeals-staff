@@ -49,6 +49,26 @@ The `vercel.json` file is already configured with:
 - ✅ Asset caching
 - ✅ Vite build configuration
 
+## Troubleshooting
+
+### CORS Error in Development
+
+If you encounter a CORS error like:
+```
+Access to fetch at 'https://your-project.supabase.co/auth/v1/token?grant_type=refresh_token' 
+from origin 'http://localhost:5173' has been blocked by CORS policy
+```
+
+**Solution**: Add `http://localhost:5173` to your Supabase project's allowed origins:
+
+1. Go to your [Supabase Dashboard](https://app.supabase.com)
+2. Select your project
+3. Navigate to **Authentication** → **URL Configuration**
+4. Under **Redirect URLs** or **Site URL**, add: `http://localhost:5173`
+5. Save the changes
+
+The Supabase client is configured with PKCE flow for better security and CORS handling.
+
 ## Project Documentation
 
 For detailed project information, see **[PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)**.

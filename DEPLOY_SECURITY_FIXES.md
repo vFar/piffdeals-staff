@@ -55,11 +55,17 @@ supabase functions deploy send-invoice-email
 
 # Deploy user creation function  
 supabase functions deploy create-user
+
+# Deploy password reset email function
+supabase functions deploy send-password-reset-email
 ```
 
 **Verify deployment:**
 - Check Supabase Dashboard → Edge Functions
-- Both functions should show updated timestamps
+- All functions should show updated timestamps:
+  - `send-invoice-email`
+  - `create-user`
+  - `send-password-reset-email`
 
 ---
 
@@ -147,7 +153,10 @@ After deployment, verify:
 
 **Deployment Required:**
 1. ✅ Run SQL migration in Supabase Dashboard
-2. ✅ Deploy both edge functions using Supabase CLI
+2. ✅ Deploy edge functions using Supabase CLI:
+   - `send-invoice-email`
+   - `create-user`
+   - `send-password-reset-email`
 
 **Time Required:** ~5-10 minutes
 
@@ -172,4 +181,5 @@ If you encounter issues:
 2. Verify all environment variables are set correctly
 3. Check that database migration completed successfully
 4. Review `SECURITY_AUDIT_REPORT.md` for context
+
 
