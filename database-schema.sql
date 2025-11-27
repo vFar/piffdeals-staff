@@ -58,6 +58,9 @@ CREATE TABLE user_profiles (
   -- User status
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended')),
   
+  -- User creation tracking
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  
   -- Timestamps
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -95,6 +98,14 @@ CREATE OR REPLACE FUNCTION public.is_super_admin(user_id UUID)
 RETURNS BOOLEAN AS $$
 BEGIN
   RETURN public.get_user_role(user_id) = 'super_admin';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to check if user is employee
+CREATE OR REPLACE FUNCTION public.is_employee(user_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN public.get_user_role(user_id) = 'employee';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -232,14 +243,19 @@ CREATE INDEX idx_invoices_stock_update_status ON invoices(stock_update_status);
 -- Enable RLS
 ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
 
--- Policy: Employees can view their own invoices, admins can view all
+-- Policy: Employees can view their own invoices, admins can view employee invoices only
 CREATE POLICY "Users can view invoices"
   ON invoices FOR SELECT
   TO authenticated
   USING (
+    -- Users can always view their own invoices
     user_id = auth.uid()
     OR
-    public.is_admin(auth.uid())
+    -- Admins can view invoices created by employees (but not by other admins)
+    (
+      public.is_admin(auth.uid())
+      AND public.is_employee(user_id)
+    )
   );
 
 -- Policy: Public can view invoices via public_token (no auth required)
@@ -258,31 +274,57 @@ CREATE POLICY "Users can create invoices"
   TO authenticated
   WITH CHECK (auth.uid() = user_id);
 
--- Policy: Only draft invoices can be updated (by creator only - no admin override)
+-- Policy: Only draft invoices can be updated
 -- sent/paid/pending/overdue are LOCKED - cannot be edited by anyone
--- Note: According to business rules, only creator can edit their own invoices
+-- Employees can update their own draft invoices
+-- Admins can update draft invoices created by employees (but not by other admins)
 CREATE POLICY "Users can update invoices"
   ON invoices FOR UPDATE
   TO authenticated
   USING (
     status = 'draft'
-    AND user_id = auth.uid()  -- Only creator, no admin override per business rules
+    AND (
+      -- Creator can always update their own invoices
+      user_id = auth.uid()
+      OR
+      -- Admins can update invoices created by employees (but not by other admins)
+      (
+        public.is_admin(auth.uid())
+        AND public.is_employee(user_id)
+      )
+    )
   )
   WITH CHECK (
     status = 'draft'
-    AND user_id = auth.uid()  -- Only creator, no admin override per business rules
+    AND (
+      -- Creator can always update their own invoices
+      user_id = auth.uid()
+      OR
+      -- Admins can update invoices created by employees (but not by other admins)
+      (
+        public.is_admin(auth.uid())
+        AND public.is_employee(user_id)
+      )
+    )
   );
 
--- Policy: Only draft invoices can be deleted (by creator or super_admin)
+-- Policy: Only draft invoices can be deleted
+-- Employees can delete their own draft invoices
+-- Admins can delete draft invoices created by employees (but not by other admins)
 CREATE POLICY "Users can delete invoices"
   ON invoices FOR DELETE
   TO authenticated
   USING (
     status = 'draft'
     AND (
+      -- Creator can always delete their own invoices
       user_id = auth.uid()
       OR
-      public.is_super_admin(auth.uid())
+      -- Admins can delete invoices created by employees (but not by other admins)
+      (
+        public.is_admin(auth.uid())
+        AND public.is_employee(user_id)
+      )
     )
   );
 
@@ -329,9 +371,14 @@ CREATE POLICY "Users can view invoice items"
       SELECT 1 FROM invoices
       WHERE invoices.id = invoice_items.invoice_id
       AND (
+        -- Users can view items from their own invoices
         invoices.user_id = auth.uid()
         OR
-        public.is_admin(auth.uid())
+        -- Admins can view items from invoices created by employees (but not by other admins)
+        (
+          public.is_admin(auth.uid())
+          AND public.is_employee(invoices.user_id)
+        )
       )
     )
   );
@@ -361,8 +408,10 @@ CREATE POLICY "Users can create invoice items"
     )
   );
 
--- Policy: Only draft invoices can have items updated (by creator or admin)
+-- Policy: Only draft invoices can have items updated
 -- sent/paid/pending/overdue are LOCKED - cannot be edited by anyone
+-- Employees can update items in their own draft invoices
+-- Admins can update items in draft invoices created by employees (but not by other admins)
 CREATE POLICY "Users can update invoice items"
   ON invoice_items FOR UPDATE
   TO authenticated
@@ -372,15 +421,22 @@ CREATE POLICY "Users can update invoice items"
       WHERE invoices.id = invoice_items.invoice_id
       AND invoices.status = 'draft'
       AND (
+        -- Creator can always update items in their own invoices
         invoices.user_id = auth.uid()
         OR
-        public.is_admin(auth.uid())
+        -- Admins can update items in invoices created by employees (but not by other admins)
+        (
+          public.is_admin(auth.uid())
+          AND public.is_employee(invoices.user_id)
+        )
       )
     )
   );
 
--- Policy: Only draft invoices can have items deleted (by creator or admin)
+-- Policy: Only draft invoices can have items deleted
 -- sent/paid/pending/overdue are LOCKED - cannot be edited by anyone
+-- Employees can delete items from their own draft invoices
+-- Admins can delete items from draft invoices created by employees (but not by other admins)
 CREATE POLICY "Users can delete invoice items"
   ON invoice_items FOR DELETE
   TO authenticated
@@ -390,9 +446,14 @@ CREATE POLICY "Users can delete invoice items"
       WHERE invoices.id = invoice_items.invoice_id
       AND invoices.status = 'draft'
       AND (
+        -- Creator can always delete items from their own invoices
         invoices.user_id = auth.uid()
         OR
-        public.is_admin(auth.uid())
+        -- Admins can delete items from invoices created by employees (but not by other admins)
+        (
+          public.is_admin(auth.uid())
+          AND public.is_employee(invoices.user_id)
+        )
       )
     )
   );

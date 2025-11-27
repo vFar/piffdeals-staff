@@ -1417,7 +1417,7 @@ const ViewInvoice = () => {
         }}
         closable={!sendingEmail && !preparingToSend}
         maskClosable={!sendingEmail && !preparingToSend}
-        destroyOnClose={false}
+        destroyOnHidden={false}
       >
         {/* Header */}
         <div style={{ 

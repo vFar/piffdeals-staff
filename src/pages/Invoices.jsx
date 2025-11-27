@@ -882,7 +882,7 @@ const Invoices = () => {
         }}
         closable={!sendingEmail}
         maskClosable={!sendingEmail}
-        destroyOnClose={false}
+        destroyOnHidden={false}
         forceRender={false}
       >
         {/* Header */}
