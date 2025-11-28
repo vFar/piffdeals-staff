@@ -20,13 +20,52 @@ const customFetch = isDev
       if (typeof targetUrl === 'string' && targetUrl.includes(supabaseUrl)) {
         const proxiedUrl = targetUrl.replace(supabaseUrl, `${window.location.origin}/supabase-api`);
         
-        // If it was a Request object, create a new Request with the proxied URL
+        // If it was a Request object, create a new one with the proxied URL
         if (url instanceof Request) {
-          return fetch(new Request(proxiedUrl, url));
+          // Extract all properties from the original request
+          const requestInit = {
+            method: url.method,
+            headers: url.headers,
+            body: url.body,
+            mode: url.mode,
+            credentials: url.credentials,
+            cache: url.cache,
+            redirect: url.redirect,
+            referrer: url.referrer,
+            referrerPolicy: url.referrerPolicy,
+            integrity: url.integrity,
+            keepalive: url.keepalive,
+            signal: url.signal,
+          };
+          
+          // Create new request with proxied URL
+          const newRequest = new Request(proxiedUrl, requestInit);
+          return fetch(newRequest);
         }
         
-        // Otherwise, just use the proxied URL
-        return fetch(proxiedUrl, options);
+        // For options object, ensure headers are properly set
+        const headers = new Headers(options.headers || {});
+        
+        // Ensure Accept header is set for Supabase REST API
+        if (!headers.has('Accept')) {
+          headers.set('Accept', 'application/json');
+        }
+        
+        // Set Content-Type for requests with body
+        if (options.body && !headers.has('Content-Type')) {
+          // Only set if body is a string or object (not FormData, Blob, etc.)
+          if (typeof options.body === 'string' || (typeof options.body === 'object' && !(options.body instanceof FormData) && !(options.body instanceof Blob))) {
+            headers.set('Content-Type', 'application/json');
+          }
+        }
+        
+        // Merge headers back into options
+        const updatedOptions = {
+          ...options,
+          headers: headers,
+        };
+        
+        return fetch(proxiedUrl, updatedOptions);
       }
       
       // Pass through non-Supabase requests

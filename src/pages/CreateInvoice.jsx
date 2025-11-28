@@ -40,6 +40,13 @@ const CreateInvoice = ({ mode = 'create' }) => {
   const [saveTemplateModalVisible, setSaveTemplateModalVisible] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const templateLoadedRef = useRef(false);
+  
+  // Barcode scanner state
+  const scannerInputRef = useRef('');
+  const scannerTimeoutRef = useRef(null);
+  const lastKeyTimeRef = useRef(0);
+  const itemsRef = useRef([]);
+  const availableProductsRef = useRef([]);
 
 
   // Form state
@@ -71,6 +78,134 @@ const CreateInvoice = ({ mode = 'create' }) => {
       message.success('Parauga dati ielādēti');
     }
   }, [mode, location.state]);
+
+  // Keep refs in sync with state for barcode scanner
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => {
+    availableProductsRef.current = availableProducts;
+  }, [availableProducts]);
+
+  // Barcode scanner effect - listens for scanner input
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const currentTime = Date.now();
+      const timeSinceLastKey = currentTime - lastKeyTimeRef.current;
+      
+      // Reset scanner input if too much time passed (user is typing manually)
+      // Scanners typically send characters very quickly (< 50ms between keys)
+      if (timeSinceLastKey > 100) {
+        scannerInputRef.current = '';
+      }
+      
+      lastKeyTimeRef.current = currentTime;
+      
+      // Ignore if user is typing in an input field
+      const activeElement = document.activeElement;
+      const isInputField = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.isContentEditable ||
+        activeElement.closest('.ant-select-dropdown') // Ignore when select dropdown is open
+      );
+      
+      // If Enter key is pressed and we have scanner input, process it
+      if (e.key === 'Enter' && scannerInputRef.current.length > 0 && !isInputField) {
+        e.preventDefault();
+        const scannedCode = scannerInputRef.current.trim();
+        scannerInputRef.current = '';
+        
+        // Process the scanned code using current ref values
+        if (scannedCode.length > 0) {
+          // Get current values from refs
+          const currentItems = itemsRef.current;
+          const currentProducts = availableProductsRef.current;
+          
+          if (currentProducts.length === 0) {
+            message.warning('Produkti vēl nav ielādēti. Lūdzu, uzgaidiet...');
+            return;
+          }
+          
+          // Search for product by SKU/barcode
+          const product = findProductBySKU(scannedCode, currentProducts);
+          
+          if (!product) {
+            message.warning(`Produkts ar SKU "${scannedCode}" nav atrasts`);
+            return;
+          }
+          
+          // Check if product is already in items
+          const existingItem = currentItems.find(item => item.productHandle === product.handle);
+          
+          if (existingItem) {
+            // Increment quantity if product already exists
+            const stockLimit = existingItem.stock !== null ? existingItem.stock : MAX_QUANTITY;
+            const maxQty = Math.min(stockLimit, MAX_QUANTITY);
+            const newQuantity = Math.min(existingItem.quantity + 1, maxQty);
+            
+            if (newQuantity === existingItem.quantity && existingItem.quantity >= maxQty) {
+              message.warning(`Maksimālais daudzums sasniegts: ${maxQty}`);
+              return;
+            }
+            
+            handleItemChange(existingItem.id, 'quantity', newQuantity);
+            message.success(`${getProductTitle(product)} - daudzums palielināts uz ${newQuantity}`);
+          } else {
+            // Add new item if product doesn't exist
+            const title = getProductTitle(product);
+            const price = getProductPrice(product);
+            const stock = product.stock;
+            
+            const newId = Math.max(...currentItems.map(i => i.id), 0) + 1;
+            const newItem = {
+              id: newId,
+              productHandle: product.handle,
+              name: title,
+              quantity: 1,
+              price: price,
+              total: calculateItemTotal(1, price),
+              stock: stock,
+            };
+            
+            setItems([...currentItems, newItem]);
+            message.success(`${title} pievienots`);
+          }
+        }
+        return;
+      }
+      
+      // Accumulate characters for scanner input (only if not in input field)
+      // Scanners send printable characters quickly, so we detect rapid input
+      if (!isInputField && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Only accept alphanumeric and common barcode characters
+        if (/^[a-zA-Z0-9\-_]+$/.test(e.key)) {
+          scannerInputRef.current += e.key;
+          
+          // Clear timeout if exists
+          if (scannerTimeoutRef.current) {
+            clearTimeout(scannerTimeoutRef.current);
+          }
+          
+          // Reset scanner input after 300ms of no input (user finished typing)
+          // This prevents accidental triggers from slow typing
+          scannerTimeoutRef.current = setTimeout(() => {
+            scannerInputRef.current = '';
+          }, 300);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (scannerTimeoutRef.current) {
+        clearTimeout(scannerTimeoutRef.current);
+      }
+    };
+  }, []); // Empty deps - we use refs to access current values
 
   const loadExistingInvoice = async () => {
     try {
@@ -243,6 +378,33 @@ const CreateInvoice = ({ mode = 'create' }) => {
     const price = product.sale_price || product.price || 0;
     return parseFloat(price) || 0;
   };
+
+  // Search product by SKU/barcode
+  const findProductBySKU = (sku, products) => {
+    if (!products || products.length === 0) return null;
+    
+    // Try multiple possible field names for SKU/barcode
+    return products.find(product => {
+      // Check product level SKU/barcode
+      if (product.sku && product.sku.toLowerCase() === sku.toLowerCase()) return true;
+      if (product.barcode && product.barcode.toLowerCase() === sku.toLowerCase()) return true;
+      if (product.code && product.code.toLowerCase() === sku.toLowerCase()) return true;
+      if (product.handle && product.handle.toLowerCase() === sku.toLowerCase()) return true;
+      
+      // Check variant level SKU/barcode
+      if (product.variants && product.variants.length > 0) {
+        return product.variants.some(variant => {
+          if (variant.sku && variant.sku.toLowerCase() === sku.toLowerCase()) return true;
+          if (variant.barcode && variant.barcode.toLowerCase() === sku.toLowerCase()) return true;
+          if (variant.code && variant.code.toLowerCase() === sku.toLowerCase()) return true;
+          return false;
+        });
+      }
+      
+      return false;
+    });
+  };
+
 
   // Maximum quantity limit per item (prevents input errors, allows bulk orders)
   const MAX_QUANTITY = 999;
