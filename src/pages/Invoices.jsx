@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Button, Table, message, Modal, Input, Dropdown, Card, Typography, Spin, Tag, App, Popconfirm } from 'antd';
-import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined } from '@ant-design/icons';
+import { Button, Table, message, Modal, Input, Dropdown, Card, Typography, Spin, Tag, App, Popconfirm, Tooltip } from 'antd';
+import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
 import { useNotifications } from '../contexts/NotificationContext';
+import { logInvoiceAction, ActionTypes } from '../services/activityLogService';
+import { mozelloService } from '../services/mozelloService';
 
 const { Title, Text } = Typography;
 
@@ -118,7 +120,7 @@ const Invoices = () => {
       if (uniqueUserIds.length > 0) {
         const { data: usersData, error: usersError } = await supabase
           .from('user_profiles')
-          .select('id, username, email')
+          .select('id, username, email, role')
           .in('id', uniqueUserIds);
 
         if (!usersError && usersData) {
@@ -173,10 +175,20 @@ const Invoices = () => {
       }
 
       // Check permissions
-      const isCreator = invoice.user_id === userProfile?.id;
-      if (!isCreator && !isSuperAdmin) {
-        message.error('Jums nav tiesību dzēst šo rēķinu');
-        return;
+      // Super admin can always delete draft invoices
+      if (isSuperAdmin) {
+        // Super admin has full permissions, proceed with deletion
+      } else {
+        const isCreator = invoice.user_id === userProfile?.id;
+        // Admin (not super_admin) can delete invoices created by employees
+        const isAdminOnly = isAdmin && !isSuperAdmin;
+        const creatorIsEmployee = invoice.creator?.role === 'employee';
+        const canDeleteAsAdmin = isAdminOnly && creatorIsEmployee;
+        
+        if (!isCreator && !canDeleteAsAdmin) {
+          message.error('Jums nav tiesību dzēst šo rēķinu');
+          return;
+        }
       }
 
       const { data, error } = await supabase
@@ -194,6 +206,23 @@ const Invoices = () => {
         message.error('Neizdevās dzēst rēķinu. Pārbaudiet, vai rēķins ir melnraksts un vai jums ir tiesības to dzēst.');
         return;
       }
+
+      // Log invoice deletion
+      const isOwnInvoice = invoice.user_id === userProfile?.id;
+      await logInvoiceAction(
+        ActionTypes.INVOICE_DELETED,
+        `Dzēsts rēķins ${invoice.invoice_number}${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
+        {
+          invoice_number: invoice.invoice_number,
+          customer_name: invoice.customer_name,
+          total_amount: parseFloat(invoice.total || 0),
+          is_own_invoice: isOwnInvoice,
+          is_other_user_invoice: !isOwnInvoice,
+          creator_username: invoice.creator?.username || 'Nezināms',
+          deleted_by: userProfile?.username || 'Nezināms',
+        },
+        invoice.id
+      );
 
       message.success('Rēķins veiksmīgi dzēsts');
       fetchInvoices();
@@ -214,8 +243,8 @@ const Invoices = () => {
       return;
     }
 
-    // Check cooldown (5 minutes = 300000ms)
-    const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+    // Check cooldown (10 minutes = 600000ms)
+    const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
     if (lastEmailSent) {
       const timeSinceLastEmail = Date.now() - lastEmailSent;
       if (timeSinceLastEmail < COOLDOWN_MS) {
@@ -266,10 +295,35 @@ const Invoices = () => {
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        // Handle 429 (Too Many Requests) with cooldown message
+        if (response.status === 429) {
+          const cooldownError = new Error(errorData.message || errorData.error || 'Cooldown active');
+          cooldownError.status = 429;
+          cooldownError.cooldownRemaining = errorData.cooldownRemaining;
+          throw cooldownError;
+        }
         throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
+
+      // Log invoice resend
+      const isOwnInvoice = currentInvoice.user_id === userProfile?.id;
+      await logInvoiceAction(
+        ActionTypes.INVOICE_RESENT,
+        `Nosūtīts rēķins ${currentInvoice.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
+        {
+          invoice_number: currentInvoice.invoice_number,
+          customer_name: currentInvoice.customer_name,
+          customer_email: currentInvoice.customer_email,
+          total_amount: parseFloat(currentInvoice.total || 0),
+          is_own_invoice: isOwnInvoice,
+          is_other_user_invoice: !isOwnInvoice,
+          creator_username: currentInvoice.creator?.username || 'Nezināms',
+          resent_by: userProfile?.username || 'Nezināms',
+        },
+        invoiceId
+      );
 
       // Update invoice status to 'sent' if it's not already
       if (currentInvoice.status !== 'sent') {
@@ -306,8 +360,14 @@ const Invoices = () => {
       
       // Keep modal open - don't close it
     } catch (error) {
-      const errorMessage = error.message || 'Nezināma kļūda';
-      message.error(`Neizdevās nosūtīt e-pastu: ${errorMessage}`);
+      // Handle cooldown errors specifically
+      if (error.status === 429 || error.message?.includes('Cooldown') || error.message?.includes('wait')) {
+        const errorMessage = error.message || 'Lūdzu, uzgaidiet pirms nākamās nosūtīšanas.';
+        message.warning(errorMessage);
+      } else {
+        const errorMessage = error.message || 'Nezināma kļūda';
+        message.error(`Neizdevās nosūtīt e-pastu: ${errorMessage}`);
+      }
       
       // Notify via notification system
       if (selectedInvoice) {
@@ -347,15 +407,73 @@ const Invoices = () => {
 
   const handleMarkAsPaid = async (invoice) => {
         try {
+          // Check if stock was already updated to avoid duplicate updates
+          const shouldUpdateStock = invoice.stock_update_status !== 'completed';
+          
+          // Update invoice status to paid first
           const { error } = await supabase
             .from('invoices')
             .update({ 
               status: 'paid',
-              paid_date: new Date().toISOString()
+              paid_date: new Date().toISOString(),
+              payment_method: invoice.payment_method || 'manuāli',
+              // Mark stock update as pending if we need to update it
+              ...(shouldUpdateStock && { stock_update_status: 'pending' })
             })
             .eq('id', invoice.id);
 
           if (error) throw error;
+          
+          // Update stock in Mozello if not already completed
+          if (shouldUpdateStock) {
+            try {
+              const stockUpdateResult = await mozelloService.updateStock(invoice.id);
+              
+              // Update invoice with stock update status
+              const stockUpdateStatus = stockUpdateResult?.success !== false ? 'completed' : 'failed';
+              await supabase
+                .from('invoices')
+                .update({
+                  stock_update_status: stockUpdateStatus,
+                  stock_updated_at: new Date().toISOString(),
+                })
+                .eq('id', invoice.id);
+              
+              if (stockUpdateStatus === 'failed') {
+                message.warning('Rēķins atzīmēts kā apmaksāts, bet neizdevās atjaunināt krājumus Mozello veikalā. Lūdzu, pārbaudiet manuāli.');
+              }
+            } catch (stockError) {
+              // Mark stock update as failed but don't fail the entire operation
+              await supabase
+                .from('invoices')
+                .update({
+                  stock_update_status: 'failed',
+                })
+                .eq('id', invoice.id);
+              
+              message.warning('Rēķins atzīmēts kā apmaksāts, bet neizdevās atjaunināt krājumus Mozello veikalā. Lūdzu, pārbaudiet manuāli.');
+            }
+          }
+          
+          // Log invoice status change to paid
+          const isOwnInvoice = invoice.user_id === userProfile?.id;
+          await logInvoiceAction(
+            ActionTypes.INVOICE_STATUS_CHANGED,
+            `Rēķins ${invoice.invoice_number} atzīmēts kā apmaksāts${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
+            {
+              invoice_number: invoice.invoice_number,
+              old_invoice_status: invoice.status,
+              new_invoice_status: 'paid',
+              customer_name: invoice.customer_name,
+              total_amount: parseFloat(invoice.total || 0),
+              payment_method: invoice.payment_method || 'manuāli',
+              is_own_invoice: isOwnInvoice,
+              is_other_user_invoice: !isOwnInvoice,
+              creator_username: invoice.creator?.username || 'Nezināms',
+              modified_by: userProfile?.username || 'Nezināms',
+            },
+            invoice.id
+          );
           
           message.success('Rēķins atzīmēts kā apmaksāts!');
           
@@ -364,9 +482,6 @@ const Invoices = () => {
           notifyInvoicePaid(updatedInvoice, invoice.payment_method || 'manuāli');
           
           fetchInvoices();
-          
-          // TODO: Trigger stock update in Mozello
-          // This should call your edge function to update stock
         } catch (error) {
           message.error('Neizdevās atjaunināt rēķinu');
         }
@@ -427,6 +542,15 @@ const Invoices = () => {
     }
   };
 
+  const formatDate = (dateString) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}.${month}.${year}`;
+  };
+
   const getStatusBadgeStyle = (status) => {
     const statusStyles = {
       draft: {
@@ -475,20 +599,12 @@ const Invoices = () => {
       render: (text) => <Text style={{ color: '#111827' }}>{text}</Text>,
     },
     {
-      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Izveidoja</span>,
-      dataIndex: 'creator',
-      key: 'creator',
-      sorter: (a, b) => (a.creator?.username || '').localeCompare(b.creator?.username || ''),
-      sortDirections: ['ascend', 'descend'],
-      render: (creator) => <Text style={{ color: '#6b7280' }}>{creator?.username || '-'}</Text>,
-    },
-    {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Izsniegšanas datums</span>,
       dataIndex: 'issue_date',
       key: 'issue_date',
       sorter: (a, b) => new Date(a.issue_date) - new Date(b.issue_date),
       sortDirections: ['ascend', 'descend'],
-      render: (date) => <Text style={{ color: '#6b7280' }}>{new Date(date).toLocaleDateString('lv-LV')}</Text>,
+      render: (date) => <Text style={{ color: '#6b7280' }}>{formatDate(date)}</Text>,
     },
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Apmaksas termiņš</span>,
@@ -496,7 +612,7 @@ const Invoices = () => {
       key: 'due_date',
       sorter: (a, b) => new Date(a.due_date || 0) - new Date(b.due_date || 0),
       sortDirections: ['ascend', 'descend'],
-      render: (date) => <Text style={{ color: '#6b7280' }}>{date ? new Date(date).toLocaleDateString('lv-LV') : '-'}</Text>,
+      render: (date) => <Text style={{ color: '#6b7280' }}>{formatDate(date)}</Text>,
     },
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Summa</span>,
@@ -517,30 +633,132 @@ const Invoices = () => {
       sortDirections: ['ascend', 'descend'],
       render: (status) => {
         const statusConfig = {
-          draft: { label: 'Melnraksts' },
-          sent: { label: 'Nosūtīts' },
-          paid: { label: 'Apmaksāts' },
-          pending: { label: 'Gaida' },
-          overdue: { label: 'Kavēts' },
-          cancelled: { label: 'Atcelts' },
+          draft: { 
+            label: 'Melnraksts',
+            description: 'Rēķins ir izveidots, bet vēl nav nosūtīts klientam. Var rediģēt un dzēst.'
+          },
+          sent: { 
+            label: 'Nosūtīts',
+            description: 'Rēķins ir nosūtīts klientam. Var koplietot saiti vai atzīmēt kā apmaksātu.'
+          },
+          paid: { 
+            label: 'Apmaksāts',
+            description: 'Rēķins ir apmaksāts. Krājumi ir atjaunināti Mozello veikalā.'
+          },
+          pending: { 
+            label: 'Gaida',
+            description: 'Rēķins gaida apmaksu. Var koplietot saiti vai atzīmēt kā apmaksātu.'
+          },
+          overdue: { 
+            label: 'Kavēts',
+            description: 'Rēķina apmaksas termiņš ir pagājis. Var koplietot saiti vai atzīmēt kā apmaksātu.'
+          },
+          cancelled: { 
+            label: 'Atcelts',
+            description: 'Rēķins ir atcelts un vairs nav aktīvs.'
+          },
         };
-        const config = statusConfig[status] || { label: status };
+        const config = statusConfig[status] || { label: status, description: 'Nezināms statuss' };
         const badgeStyle = getStatusBadgeStyle(status);
         return (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              borderRadius: '9999px',
-              padding: '4px 12px',
-              fontSize: '12px',
-              fontWeight: 500,
-              background: badgeStyle.background,
-              color: badgeStyle.color,
-            }}
+          <Tooltip 
+            title={
+              <div style={{ maxWidth: '250px' }}>
+                <div style={{ fontWeight: 600, marginBottom: '4px' }}>{config.label}</div>
+                <div style={{ fontSize: '12px', lineHeight: '1.5' }}>
+                  {config.description}
+                </div>
+              </div>
+            }
+            placement="top"
           >
-            {config.label}
-          </span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                borderRadius: '9999px',
+                padding: '4px 12px',
+                fontSize: '12px',
+                fontWeight: 500,
+                background: badgeStyle.background,
+                color: badgeStyle.color,
+                cursor: 'help',
+                transition: 'opacity 0.2s',
+              }}
+            >
+              {config.label}
+              <InfoCircleOutlined 
+                style={{ 
+                  fontSize: '11px', 
+                  opacity: 0.7,
+                  marginLeft: '2px'
+                }} 
+              />
+            </span>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Izveidoja</span>,
+      dataIndex: 'creator',
+      key: 'creator',
+      sorter: (a, b) => (a.creator?.username || '').localeCompare(b.creator?.username || ''),
+      sortDirections: ['ascend', 'descend'],
+      render: (creator) => {
+        if (!creator) return <Text style={{ color: '#6b7280' }}>-</Text>;
+        
+        const roleLabels = {
+          'super_admin': 'Galvenais administrators',
+          'admin': 'administrators',
+          'employee': 'Darbinieks'
+        };
+        
+        const roleStyles = {
+          'super_admin': {
+            background: '#fef2f2',
+            color: '#dc2626',
+            border: '1px solid #fecaca'
+          },
+          'admin': {
+            background: '#eff6ff',
+            color: '#2563eb',
+            border: '1px solid #bfdbfe'
+          },
+          'employee': {
+            background: '#f9fafb',
+            color: '#6b7280',
+            border: '1px solid #e5e7eb'
+          }
+        };
+        
+        const roleStyle = roleStyles[creator.role] || roleStyles['employee'];
+        
+        return (
+          <Tooltip
+            title={creator.email || 'Nav norādīts'}
+            placement="top"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', cursor: 'help' }}>
+              <Text style={{ color: '#111827', fontWeight: 500, fontSize: '14px' }}>{creator.username}</Text>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  borderRadius: '6px',
+                  padding: '2px 8px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  letterSpacing: '0.01em',
+                  width: 'fit-content',
+                  ...roleStyle
+                }}
+              >
+                {roleLabels[creator.role] || creator.role}
+              </span>
+            </div>
+          </Tooltip>
         );
       },
     },
@@ -550,12 +768,16 @@ const Invoices = () => {
       render: (_, record) => {
         const menuItems = [];
         const isCreator = record.user_id === userProfile?.id;
-        const canEdit = record.status === 'draft' && (isCreator || isSuperAdmin);
-        const canDelete = record.status === 'draft' && (isCreator || isSuperAdmin);
+        // Admin (not super_admin) can edit/delete invoices created by employees
+        const isAdminOnly = isAdmin && !isSuperAdmin;
+        const creatorIsEmployee = record.creator?.role === 'employee';
+        const canEditAsAdmin = isAdminOnly && creatorIsEmployee;
+        const canEdit = record.status === 'draft' && (isCreator || isSuperAdmin || canEditAsAdmin);
+        const canDelete = record.status === 'draft' && (isCreator || isSuperAdmin || canEditAsAdmin);
         const canMarkPaid = ['sent', 'pending', 'overdue'].includes(record.status) && (isCreator || isSuperAdmin);
         const canCancel = record.status !== 'paid' && (isCreator || isSuperAdmin);
 
-        // Edit action - for draft invoices (creator or super_admin)
+        // Edit action - for draft invoices (creator, super_admin, or admin for employee invoices)
         if (canEdit) {
           menuItems.push({
             key: 'edit',
@@ -601,15 +823,21 @@ const Invoices = () => {
                 title="Atzīmēt kā apmaksātu?"
                 description={
                   <div>
-                    <p>Vai apstiprināt, ka rēķins {record.invoice_number} ir apmaksāts?</p>
-                    <p style={{ color: '#6b7280', fontSize: '12px', marginTop: '8px' }}>
-                      Šī darbība atjauninās krājumus Mozello veikalā un iekļaus rēķinu pārdošanas pārskatos.
+                    <p style={{ fontWeight: 600, marginBottom: '8px' }}>
+                      Vai apstiprināt, ka rēķins {record.invoice_number} ir apmaksāts?
+                    </p>
+                    <p style={{ color: '#dc2626', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
+                      ⚠️ ŠĪ DARBĪBA IR NEATSAUKAMA!
+                    </p>
+                    <p style={{ color: '#6b7280', fontSize: '12px', marginTop: '8px', lineHeight: '1.6' }}>
+                      Šī darbība automātiski atjauninās krājumus Mozello veikalā, iekļaus rēķinu pārdošanas pārskatos un nevar būt atcelta. Pārliecinieties, ka maksājums ir saņemts pirms apstiprināšanas.
                     </p>
                   </div>
                 }
                 onConfirm={() => handleMarkAsPaid(record)}
                 okText="Apstiprināt"
                 cancelText="Atcelt"
+                okButtonProps={{ danger: true }}
               >
                 <span>Atzīmēt kā apmaksātu</span>
               </Popconfirm>
@@ -641,7 +869,7 @@ const Invoices = () => {
           });
         }
 
-        // Delete action - for draft invoices (creator or super_admin)
+        // Delete action - for draft invoices (creator, super_admin, or admin for employee invoices)
         if (canDelete) {
           if (menuItems.length > 0) {
             menuItems.push({ type: 'divider' });
@@ -696,9 +924,24 @@ const Invoices = () => {
         {/* Page Header */}
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
-              Rēķini
-            </Title>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
+              <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
+                Rēķini
+              </Title>
+              <Tooltip 
+                title={
+                  <div style={{ maxWidth: '300px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '8px' }}>Rēķinu pārvalde</div>
+                    <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                      Šeit varat skatīt, meklēt un pārvaldīt visus rēķinus. Darbinieki redz tikai savus rēķinus, bet administratori redz visus. Melnraksta rēķinus var rediģēt un dzēst. Nosūtītos rēķinus var koplietot ar klientiem vai atzīmēt kā apmaksātus. E-pastu var nosūtīt tikai reizi 5 minūtēs.
+                    </div>
+                  </div>
+                }
+                placement="right"
+              >
+                <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+              </Tooltip>
+            </div>
             <Text style={{ fontSize: '16px', color: '#6b7280', lineHeight: '1.5' }}>
               Pārvaldīt un sekot visiem rēķiniem
             </Text>

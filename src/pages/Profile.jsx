@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Card, Typography, Form, Input, Button, message, Modal, Space, App } from 'antd';
-import { LockOutlined, ExclamationCircleOutlined, UserOutlined } from '@ant-design/icons';
+import { Card, Typography, Form, Input, Button, message, Modal, Space, App, Tooltip } from 'antd';
+import { LockOutlined, ExclamationCircleOutlined, UserOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { logUserAction, ActionTypes } from '../services/activityLogService';
 
 const { Title, Text } = Typography;
 
@@ -42,6 +43,25 @@ const Profile = () => {
 
       if (updateError) throw updateError;
 
+      // Log password change
+      try {
+        await logUserAction(
+          ActionTypes.PASSWORD_CHANGED,
+          `Mainīta lietotāja parole: ${userProfile.username} (savs konts)`,
+          {
+            is_own_account: true,
+            is_other_user_account: false,
+            modified_by: userProfile.username,
+            target_user_role: userProfile.role,
+            target_user_status: userProfile.status,
+          },
+          userProfile.id
+        );
+      } catch (logError) {
+        // Log error but don't block password change
+        console.error('Error logging password change:', logError);
+      }
+
       messageApi.success('Parole veiksmīgi nomainīta');
       passwordForm.resetFields();
     } catch (error) {
@@ -74,6 +94,37 @@ const Profile = () => {
         messageApi.error('Nav derīgas sesijas');
         setDeletingAccount(false);
         return;
+      }
+
+      // Log account deletion BEFORE deletion (so we can still access user info)
+      // Store user info in case deletion succeeds and we need it for logging
+      const userInfoForLogging = {
+        id: userProfile.id,
+        username: userProfile.username,
+        email: userProfile.email,
+        role: userProfile.role,
+        status: userProfile.status,
+      };
+
+      try {
+        await logUserAction(
+          ActionTypes.USER_DELETED,
+          `Dzēsts lietotāja konts: ${userInfoForLogging.username} (savs konts - pašdzēšana)`,
+          {
+            deleted_user_role: userInfoForLogging.role,
+            deleted_user_status: userInfoForLogging.status,
+            is_own_account: true,
+            is_other_user_account: false,
+            deleted_by: userInfoForLogging.username,
+            self_deletion: true,
+            target_user_role: userInfoForLogging.role,
+            target_user_status: userInfoForLogging.status,
+          },
+          userInfoForLogging.id
+        );
+      } catch (logError) {
+        // Log error but don't block deletion - logging should not prevent account deletion
+        console.error('Error logging account deletion:', logError);
       }
 
       // Call the delete-user edge function to delete the auth user
@@ -131,9 +182,24 @@ const Profile = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         {/* Page Header */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
-            Profila iestatījumi
-          </Title>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
+              Profila iestatījumi
+            </Title>
+            <Tooltip 
+              title={
+                <div style={{ maxWidth: '300px' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '8px' }}>Profila iestatījumi</div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                    Šeit varat mainīt savu paroli. Jaunajai parolei jābūt vismaz 8 simbolu garai un atšķirīgai no pašreizējās. Varat arī dzēst savu kontu - šī darbība ir neatgriezeniska un dzēsīs visus jūsu datus no sistēmas.
+                  </div>
+                </div>
+              }
+              placement="right"
+            >
+              <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+            </Tooltip>
+          </div>
         </div>
 
         {/* User Info Card */}

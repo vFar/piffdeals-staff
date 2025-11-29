@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Typography, Breadcrumb, Tag, Space, message, Spin, Modal, Form, Input, Select, Button, Popconfirm, Dropdown, App } from 'antd';
-import { PlusOutlined, MoreOutlined, SearchOutlined, UserSwitchOutlined, DeleteOutlined, EditOutlined, MailOutlined } from '@ant-design/icons';
+import { Card, Table, Typography, Breadcrumb, Tag, Space, message, Spin, Modal, Form, Input, Select, Button, Popconfirm, Dropdown, App, Tooltip } from 'antd';
+import { PlusOutlined, MoreOutlined, SearchOutlined, UserSwitchOutlined, DeleteOutlined, EditOutlined, MailOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
 import { sendPasswordResetEmail } from '../services/userService';
+import { logUserAction, logSecurityAction, ActionTypes, ActionCategories } from '../services/activityLogService';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -186,6 +187,29 @@ const UserAccounts = () => {
       // Edge Function creates both auth user AND profile, so we're done!
       // No need to create profile here - it's already created by the Edge Function
 
+      // Log activity: user created
+      if (userId) {
+        try {
+          const logResult = await logUserAction(
+            ActionTypes.USER_CREATED,
+            `Izveidots jauns lietotāja konts: ${values.name} ar lomu "${getRoleLabel(values.role).label}"`,
+            {
+              created_user_role: values.role,
+              created_user_status: values.status,
+              created_by: userProfile?.username || 'Nezināms',
+              target_user_role: values.role,
+              target_user_status: values.status,
+            },
+            userId
+          );
+          if (!logResult.success) {
+            console.error('Failed to log user creation:', logResult.error);
+          }
+        } catch (logError) {
+          console.error('Error logging user creation:', logError);
+        }
+      }
+
       messageApi.success('Lietotājs veiksmīgi izveidots');
       setIsModalOpen(false);
       form.resetFields();
@@ -273,6 +297,37 @@ const UserAccounts = () => {
       const result = await response.json();
       
       if (result.success) {
+        // Log activity: bulk user deletion
+        const deletedUserIds = result.deletedUserIds || selectedRowKeys;
+        const deletedUsers = users.filter((u) => deletedUserIds.includes(u.id));
+        
+        for (const deletedUser of deletedUsers) {
+          const isOwnAccount = deletedUser.id === userProfile?.id;
+          try {
+            const logResult = await logUserAction(
+              ActionTypes.USER_DELETED,
+              `Dzēsts lietotāja konts: ${deletedUser.username}${isOwnAccount ? ' (savs konts)' : ' (cita lietotāja konts)'}${deletedUserIds.length > 1 ? ` (masveida dzēšana)` : ''}`,
+              {
+                deleted_user_role: deletedUser.role,
+                deleted_user_status: deletedUser.status,
+                bulk_action: deletedUserIds.length > 1,
+                total_deleted: deletedUserIds.length > 1 ? deletedUserIds.length : undefined,
+                is_own_account: isOwnAccount,
+                is_other_user_account: !isOwnAccount,
+                deleted_by: userProfile?.username || 'Nezināms',
+                target_user_role: deletedUser.role,
+                target_user_status: deletedUser.status,
+              },
+              deletedUser.id
+            );
+            if (!logResult.success) {
+              console.error('Failed to log user deletion:', logResult.error);
+            }
+          } catch (logError) {
+            console.error('Error logging user deletion:', logError);
+          }
+        }
+
         if (result.errors && result.errors.length > 0) {
           // Partial success
           message.warning(`${result.deletedUserIds?.length || 0} lietotāji izdzēsti, ${result.errors.length} neizdevās`);
@@ -310,6 +365,37 @@ const UserAccounts = () => {
         .in('id', selectedRowKeys);
 
       if (error) throw error;
+
+      // Log activity: bulk role change
+      const updatedUsers = users.filter((u) => selectedRowKeys.includes(u.id));
+      for (const user of updatedUsers) {
+        if (user.role !== values.role) {
+          const isOwnAccount = user.id === userProfile?.id;
+          try {
+            const result = await logUserAction(
+              ActionTypes.ROLE_CHANGED,
+              `Mainīta lietotāja loma: ${user.username} no "${getRoleLabel(user.role).label}" uz "${getRoleLabel(values.role).label}"${isOwnAccount ? ' (savs konts)' : ' (cita lietotāja konts)'}${selectedRowKeys.length > 1 ? ` (masveida maiņa)` : ''}`,
+              {
+                old_role: user.role,
+                new_role: values.role,
+                bulk_action: selectedRowKeys.length > 1,
+                total_updated: selectedRowKeys.length > 1 ? selectedRowKeys.length : undefined,
+                is_own_account: isOwnAccount,
+                is_other_user_account: !isOwnAccount,
+                modified_by: userProfile?.username || 'Nezināms',
+                target_user_role: values.role,
+              },
+              user.id
+            );
+            if (!result.success) {
+              console.warn('Failed to log role change:', result.error);
+            }
+          } catch (logError) {
+            console.error('Error logging role change:', logError);
+            // Don't throw - logging failure shouldn't block the operation
+          }
+        }
+      }
 
       message.success(`${selectedRowKeys.length} lietotāju lomas veiksmīgi mainītas`);
       setIsBulkRoleModalOpen(false);
@@ -443,6 +529,86 @@ const UserAccounts = () => {
       }
 
       console.log('Successfully updated users:', data);
+      
+      // Log activity: bulk status change
+      // IMPORTANT: Get previous users BEFORE fetchUsers() updates the state
+      const previousUsers = users.filter((u) => selectedRowKeys.includes(u.id));
+      console.log('Previous users for logging:', previousUsers);
+      console.log('Current users state length:', users.length);
+      console.log('Selected row keys:', selectedRowKeys);
+      
+      for (const updatedUser of data) {
+        const previousUser = previousUsers.find((u) => u.id === updatedUser.id);
+        console.log(`Processing user ${updatedUser.username}:`, {
+          previousUser: previousUser ? 'found' : 'NOT FOUND',
+          previousStatus: previousUser?.status,
+          newStatus: status,
+          statusChanged: previousUser && previousUser.status !== status,
+          willLog: previousUser && previousUser.status !== status
+        });
+        
+        // ALWAYS log if we have a previous user, even if status appears the same
+        // (sometimes the state might already be updated)
+        if (previousUser) {
+          // Log regardless - the database update already happened
+          const statusActuallyChanged = previousUser.status !== status;
+          console.log(`Status actually changed: ${statusActuallyChanged} (${previousUser.status} -> ${status})`);
+          
+          if (statusActuallyChanged) {
+          const isOwnAccount = updatedUser.id === userProfile?.id;
+          const logDescription = `Mainīts lietotāja statuss: ${updatedUser.username} no "${getStatusLabel(previousUser.status).label}" uz "${getStatusLabel(status).label}"${isOwnAccount ? ' (savs konts)' : ' (cita lietotāja konts)'}${data.length > 1 ? ` (masveida maiņa)` : ''}`;
+          
+          console.log('Attempting to log status change:', {
+            actionType: ActionTypes.STATUS_CHANGED,
+            description: logDescription,
+            userId: updatedUser.id
+          });
+          
+          try {
+            const result = await logUserAction(
+              ActionTypes.STATUS_CHANGED,
+              logDescription,
+              {
+                old_status: previousUser.status,
+                new_status: status,
+                bulk_action: data.length > 1,
+                total_updated: data.length > 1 ? data.length : undefined,
+                is_own_account: isOwnAccount,
+                is_other_user_account: !isOwnAccount,
+                modified_by: userProfile?.username || 'Nezināms',
+                target_user_role: updatedUser.role,
+                target_user_status: status,
+              },
+              updatedUser.id
+            );
+            
+            console.log('Log result:', result);
+            
+            if (!result.success) {
+              console.error('Failed to log status change:', result.error);
+              console.error('Error details:', {
+                message: result.error?.message,
+                stack: result.error?.stack
+              });
+            } else {
+              console.log('Successfully logged status change, log ID:', result.logId);
+            }
+          } catch (logError) {
+            console.error('Exception while logging status change:', logError);
+            console.error('Error details:', {
+              message: logError?.message,
+              stack: logError?.stack
+            });
+            // Don't throw - logging failure shouldn't block the operation
+          }
+          } else {
+            console.warn(`Skipping log for ${updatedUser.username}: status appears unchanged (${previousUser.status} -> ${status})`);
+          }
+        } else {
+          console.error(`Cannot log: previousUser not found for ${updatedUser.username} (ID: ${updatedUser.id})`);
+        }
+      }
+
       message.success(`${data.length} lietotāju statusi veiksmīgi mainīti`);
       setSelectedRowKeys([]);
       fetchUsers();
@@ -511,6 +677,16 @@ const UserAccounts = () => {
       setSubmitting(true);
       
       const result = await sendPasswordResetEmail(editingUser.email, editingUser.username);
+      
+      // Log activity: password reset requested
+      await logSecurityAction(
+        ActionTypes.PASSWORD_RESET_REQUESTED,
+        `Nosūtīts paroles maiņas e-pasts lietotājam ${editingUser.username}`,
+        {
+          sent_by_admin: true,
+        }
+      );
+
       messageApi.success(`Paroles maiņas e-pasts nosūtīts uz ${editingUser.email}`);
       
       // Set cooldown to 10 minutes (600 seconds)
@@ -728,6 +904,129 @@ const UserAccounts = () => {
       }
 
       console.log('Successfully updated user:', data[0]);
+      
+      const updatedUser = data[0];
+      const changes = [];
+      const details = {
+        target_user_id: editingUser.id,
+        target_user_email: editingUser.email,
+        target_user_username: editingUser.username,
+      };
+
+      console.log('Comparing changes:', {
+        editingUserStatus: editingUser.status,
+        valuesStatus: values.status,
+        editingUserRole: editingUser.role,
+        valuesRole: values.role,
+        editingUserUsername: editingUser.username,
+        valuesName: values.name,
+        editingUserEmail: editingUser.email,
+        valuesEmail: values.email
+      });
+
+      // Track what changed
+      if (editingUser.username !== values.name) {
+        changes.push(`vārds: "${editingUser.username}" → "${values.name}"`);
+        details.old_username = editingUser.username;
+        details.new_username = values.name;
+      }
+      if (editingUser.email.toLowerCase() !== values.email.toLowerCase()) {
+        changes.push(`e-pasts: "${editingUser.email}" → "${values.email}"`);
+        details.old_email = editingUser.email;
+        details.new_email = values.email;
+      }
+      if (editingUser.role !== values.role) {
+        changes.push(`loma: "${getRoleLabel(editingUser.role).label}" → "${getRoleLabel(values.role).label}"`);
+        details.old_role = editingUser.role;
+        details.new_role = values.role;
+      }
+      if (editingUser.status !== values.status) {
+        changes.push(`statuss: "${getStatusLabel(editingUser.status).label}" → "${getStatusLabel(values.status).label}"`);
+        details.old_status = editingUser.status;
+        details.new_status = values.status;
+      }
+
+      console.log('Changes detected:', changes);
+      console.log('Changes length:', changes.length);
+      console.log('Will log?', changes.length > 0);
+
+      // Log activity: user updated
+      if (changes.length > 0) {
+        // Determine action type based on what changed
+        let actionType = ActionTypes.USER_UPDATED;
+        let description = 'Atjaunināti lietotāja dati';
+        
+        if (details.old_role !== undefined || details.new_role !== undefined) {
+          actionType = ActionTypes.ROLE_CHANGED;
+          description = `Mainīta loma no "${getRoleLabel(details.old_role).label}" uz "${getRoleLabel(details.new_role).label}"`;
+        } else if (details.old_status !== undefined || details.new_status !== undefined) {
+          actionType = ActionTypes.STATUS_CHANGED;
+          description = `Mainīts statuss no "${getStatusLabel(details.old_status).label}" uz "${getStatusLabel(details.new_status).label}"`;
+        } else if (details.old_username || details.new_username) {
+          description = 'Mainīts lietotāja vārds';
+        } else if (details.old_email || details.new_email) {
+          description = 'Mainīts lietotāja e-pasts';
+        }
+
+        // Clean up details - remove IDs and emails/usernames
+        const cleanDetails = { ...details };
+        delete cleanDetails.target_user_id;
+        delete cleanDetails.target_user_email;
+        delete cleanDetails.target_user_username;
+        delete cleanDetails.old_email;
+        delete cleanDetails.new_email;
+        delete cleanDetails.old_username;
+        delete cleanDetails.new_username;
+
+        const isOwnAccount = editingUser.id === userProfile?.id;
+        const enhancedDetails = {
+          ...cleanDetails,
+          is_own_account: isOwnAccount,
+          is_other_user_account: !isOwnAccount,
+          modified_by: userProfile?.username || 'Nezināms',
+          target_user_role: updatedUser.role,
+          target_user_status: updatedUser.status,
+        };
+        
+        // Enhance description to indicate if it's own account or other user's account
+        const enhancedDescription = `${description}: ${editingUser.username}${isOwnAccount ? ' (savs konts)' : ' (cita lietotāja konts)'}`;
+        
+        console.log('Attempting to log user update:', {
+          actionType,
+          description: enhancedDescription,
+          userId: editingUser.id,
+          details: enhancedDetails
+        });
+        
+        try {
+          const result = await logUserAction(
+            actionType,
+            enhancedDescription,
+            enhancedDetails,
+            editingUser.id
+          );
+          
+          console.log('Log result:', result);
+          
+          if (!result.success) {
+            console.error('Failed to log user update:', result.error);
+            console.error('Error details:', {
+              message: result.error?.message,
+              stack: result.error?.stack
+            });
+          } else {
+            console.log('Successfully logged user update, log ID:', result.logId);
+          }
+        } catch (logError) {
+          console.error('Exception while logging user update:', logError);
+          console.error('Error details:', {
+            message: logError?.message,
+            stack: logError?.stack
+          });
+          // Don't throw - logging failure shouldn't block the operation
+        }
+      }
+
       message.success('Lietotāja dati veiksmīgi atjaunināti');
       setIsEditModalOpen(false);
       editForm.resetFields();
@@ -792,17 +1091,14 @@ const UserAccounts = () => {
       .join(' ');
   };
 
-  // Format date
+  // Format date with leading zeros
   const formatDate = (dateString) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
-    return date.toLocaleDateString('lv-LV', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}.${month}.${year}`;
   };
 
   // Get status badge style
@@ -954,9 +1250,24 @@ const UserAccounts = () => {
         {/* Page Header */}
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
-              Lietotāju konti
-            </Title>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '4px' }}>
+              <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
+                Lietotāju konti
+              </Title>
+              <Tooltip 
+                title={
+                  <div style={{ maxWidth: '300px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '8px' }}>Lietotāju pārvalde</div>
+                    <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                      Šeit varat izveidot, rediģēt un pārvaldīt sistēmas lietotājus. Administrators var izveidot tikai darbiniekus, bet galvenais administrators var izveidot visus lietotājus. Varat mainīt lomas, statusus un veikt masveida darbības. Aizliegtus lietotājus var atbloķēt tikai galvenais administrators.
+                    </div>
+                  </div>
+                }
+                placement="right"
+              >
+                <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+              </Tooltip>
+            </div>
             <Text style={{ fontSize: '16px', color: '#6b7280', lineHeight: '1.5' }}>
               Pārvaldīt sistēmas lietotājus un to piekļuves lomas
             </Text>

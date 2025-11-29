@@ -13,13 +13,17 @@ import {
   Card,
   Divider,
   Alert,
-  Modal
+  Modal,
+  Tooltip,
+  Typography
 } from 'antd';
-import { DeleteOutlined, PlusOutlined, SaveOutlined, FileTextOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, SaveOutlined, FileTextOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useUserRole } from '../hooks/useUserRole';
 import { mozelloService } from '../services/mozelloService';
+import { logInvoiceAction, ActionTypes } from '../services/activityLogService';
 import dayjs from 'dayjs';
 
 const { Option } = Select;
@@ -30,6 +34,7 @@ const CreateInvoice = ({ mode = 'create' }) => {
   const location = useLocation();
   const { invoiceNumber: editInvoiceNumber } = useParams();
   const { currentUser } = useAuth();
+  const { isAdmin, isSuperAdmin } = useUserRole();
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -223,16 +228,52 @@ const CreateInvoice = ({ mode = 'create' }) => {
 
       if (invoiceError) throw invoiceError;
 
-      // Check if user is the creator
-      if (invoice.user_id !== currentUser.id) {
-        message.error('Jūs nevarat rediģēt šo rēķinu');
+      // Check if invoice is draft
+      if (invoice.status !== 'draft') {
+        message.error('Var rediģēt tikai melnraksta rēķinus');
         navigate('/invoices');
         return;
       }
 
-      // Check if invoice is draft
-      if (invoice.status !== 'draft') {
-        message.error('Var rediģēt tikai melnraksta rēķinus');
+      // Fetch current user's profile to check their role (in case useUserRole hasn't loaded yet)
+      let currentUserProfile = null;
+      if (currentUser?.id) {
+        const { data: currentUserData, error: currentUserError } = await supabase
+          .from('user_profiles')
+          .select('id, role')
+          .eq('id', currentUser.id)
+          .maybeSingle();
+        
+        if (!currentUserError && currentUserData) {
+          currentUserProfile = currentUserData;
+        }
+      }
+
+      // Fetch creator's profile to check their role
+      let creatorProfile = null;
+      if (invoice.user_id) {
+        const { data: creatorData, error: creatorError } = await supabase
+          .from('user_profiles')
+          .select('id, username, email, role')
+          .eq('id', invoice.user_id)
+          .maybeSingle();
+        
+        if (!creatorError && creatorData) {
+          creatorProfile = creatorData;
+        }
+      }
+
+      // Check if user has permission to edit
+      const isCreator = invoice.user_id === currentUser.id;
+      // Use currentUserProfile role if available, otherwise fall back to useUserRole hook values
+      const currentUserRole = currentUserProfile?.role;
+      const isAdminOnly = currentUserRole === 'admin';
+      const isSuperAdminUser = currentUserRole === 'super_admin';
+      const creatorIsEmployee = creatorProfile?.role === 'employee';
+      const canEditAsAdmin = isAdminOnly && creatorIsEmployee;
+      
+      if (!isCreator && !isSuperAdminUser && !canEditAsAdmin) {
+        message.error('Jūs nevarat rediģēt šo rēķinu');
         navigate('/invoices');
         return;
       }
@@ -273,7 +314,10 @@ const CreateInvoice = ({ mode = 'create' }) => {
       setItems(loadedItems);
 
     } catch (error) {
-      message.error('Neizdevās ielādēt rēķinu');
+      // Only show error if it's not a permission error (already shown above)
+      if (error.message !== 'Permission denied') {
+        message.error('Neizdevās ielādēt rēķinu');
+      }
       navigate('/invoices');
     } finally {
       setLoadingInvoice(false);
@@ -617,6 +661,40 @@ const CreateInvoice = ({ mode = 'create' }) => {
 
       if (itemsError) throw itemsError;
 
+      // Log invoice creation or update
+      const isOwnInvoice = existingInvoice ? existingInvoice.user_id === currentUser.id : true;
+      if (mode === 'edit' && existingInvoice) {
+        // Log invoice update
+        await logInvoiceAction(
+          ActionTypes.INVOICE_UPDATED,
+          `Rediģēts rēķins ${invoice.invoice_number}${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
+          {
+            invoice_number: invoice.invoice_number,
+            customer_name: invoice.customer_name,
+            total_amount: parseFloat(invoice.total || 0),
+            is_own_invoice: isOwnInvoice,
+            is_other_user_invoice: !isOwnInvoice,
+            modified_by: currentUser?.user_metadata?.username || currentUser?.email || 'Nezināms',
+          },
+          invoice.id
+        );
+      } else {
+        // Log invoice creation
+        await logInvoiceAction(
+          ActionTypes.INVOICE_CREATED,
+          `Izveidots jauns rēķins ${invoice.invoice_number}`,
+          {
+            invoice_number: invoice.invoice_number,
+            customer_name: invoice.customer_name,
+            customer_email: invoice.customer_email,
+            total_amount: parseFloat(invoice.total || 0),
+            is_own_invoice: true,
+            created_by: currentUser?.user_metadata?.username || currentUser?.email || 'Nezināms',
+          },
+          invoice.id
+        );
+      }
+
       setLoading(false);
       const successMsg = mode === 'edit' 
         ? 'Rēķins atjaunināts!'
@@ -758,9 +836,24 @@ const CreateInvoice = ({ mode = 'create' }) => {
       <Spin spinning={loading || loadingInvoice}>
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
           <div style={{ marginBottom: 24 }}>
-            <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }}>
-              {mode === 'edit' ? 'Rediģēt rēķinu' : 'Izveidot rēķinu'}
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }}>
+                {mode === 'edit' ? 'Rediģēt rēķinu' : 'Izveidot rēķinu'}
+              </h1>
+              <Tooltip 
+                title={
+                  <div style={{ maxWidth: '300px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '8px' }}>Rēķina izveide</div>
+                    <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                      Izveidojiet jaunu rēķinu, aizpildot klienta datus un pievienojot produktus. Varat izmantot barcode skeneri, lai ātri pievienotu produktus. Apmaksas termiņš tiek automātiski aprēķināts (+5 dienas). Varat saglabāt klienta datus kā paraugu nākamajiem rēķiniem. Rediģēt var tikai melnraksta rēķinus.
+                    </div>
+                  </div>
+                }
+                placement="right"
+              >
+                <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+              </Tooltip>
+            </div>
           </div>
 
           {mode === 'edit' && (

@@ -47,6 +47,7 @@ export const logActivity = async ({
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     
     if (userError || !user) {
+      console.error('[ActivityLog] User not authenticated:', userError);
       return { success: false, error: new Error('User not authenticated') };
     }
 
@@ -60,10 +61,33 @@ export const logActivity = async ({
       finalUserAgent = navigator.userAgent;
     }
 
+    // Get user profile first (needed for both RPC and direct insert)
+    const { data: userProfile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('username, email, role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      console.warn('[ActivityLog] Could not fetch user profile:', profileError);
+    }
+
+    // Prepare user data for logging
+    const userUsername = userProfile?.username || user.user_metadata?.username || 'Unknown';
+    const userEmail = userProfile?.email || user.email || 'unknown@example.com';
+    const userRole = userProfile?.role || 'employee';
+
     // Call the database function to log activity
-    // Note: This requires the user to be a super_admin OR we need to use service role
-    // For now, we'll use RPC call which will be restricted by RLS
+    // The function uses SECURITY DEFINER so any authenticated user can call it
     // The function accepts details as TEXT (JSON string) and converts to JSONB internally
+    console.log('[ActivityLog] Attempting to log:', {
+      actionType,
+      actionCategory,
+      description,
+      userId: user.id,
+      username: userUsername
+    });
+    
     const { data, error } = await supabase.rpc('log_activity', {
       p_user_id: user.id,
       p_action_type: actionType,
@@ -77,16 +101,101 @@ export const logActivity = async ({
     });
 
     if (error) {
-      // If error is permission denied, it's expected for non-super-admins
-      // We'll log it but not throw (activity logging should not break the main flow)
-      if (error.code === '42501' || error.message?.includes('permission')) {
-        return { success: false, error: new Error('Permission denied') };
+      console.error('[ActivityLog] RPC call failed:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint
+      });
+      
+      // Always try direct insert as fallback if RPC fails
+      console.warn('[ActivityLog] Attempting direct insert as fallback...');
+      try {
+        const { data: insertData, error: insertError } = await supabase
+          .from('activity_logs')
+          .insert({
+            user_id: user.id,
+            user_username: userUsername,
+            user_email: userEmail,
+            user_role: userRole,
+            action_type: actionType,
+            action_category: actionCategory,
+            description: description,
+            details: details,
+            target_type: targetType,
+            target_id: targetId,
+            ip_address: finalIpAddress,
+            user_agent: finalUserAgent,
+          })
+          .select('id')
+          .single();
+        
+        if (insertError) {
+          console.error('[ActivityLog] Direct insert also failed:', {
+            code: insertError.code,
+            message: insertError.message,
+            details: insertError.details,
+            hint: insertError.hint
+          });
+          
+          // Return the original RPC error, not the insert error
+          return { 
+            success: false, 
+            error: new Error(`Failed to log activity: ${error.message || 'Unknown error'}. Please ensure the log_activity function exists in the database.`) 
+          };
+        }
+        
+        console.log('[ActivityLog] Successfully logged via direct insert, log ID:', insertData.id);
+        return { success: true, logId: insertData.id };
+      } catch (fallbackError) {
+        console.error('[ActivityLog] Fallback insert exception:', fallbackError);
+        return { 
+          success: false, 
+          error: new Error(`Failed to log activity: ${error.message || 'Unknown error'}. Please ensure the log_activity function exists in the database.`) 
+        };
       }
-      return { success: false, error };
     }
 
+    if (!data) {
+      console.warn('[ActivityLog] RPC returned no data, trying direct insert...');
+      // RPC succeeded but returned no data, try direct insert
+      try {
+        const { data: insertData, error: insertError } = await supabase
+          .from('activity_logs')
+          .insert({
+            user_id: user.id,
+            user_username: userUsername,
+            user_email: userEmail,
+            user_role: userRole,
+            action_type: actionType,
+            action_category: actionCategory,
+            description: description,
+            details: details,
+            target_type: targetType,
+            target_id: targetId,
+            ip_address: finalIpAddress,
+            user_agent: finalUserAgent,
+          })
+          .select('id')
+          .single();
+        
+        if (insertError) {
+          console.error('[ActivityLog] Direct insert failed:', insertError);
+          return { success: false, error: new Error('Failed to log activity: RPC returned no data and direct insert failed') };
+        }
+        
+        console.log('[ActivityLog] Successfully logged via direct insert, log ID:', insertData.id);
+        return { success: true, logId: insertData.id };
+      } catch (fallbackError) {
+        console.error('[ActivityLog] Fallback insert exception:', fallbackError);
+        return { success: false, error: new Error('Failed to log activity: RPC returned no data and direct insert failed') };
+      }
+    }
+
+    console.log('[ActivityLog] Successfully logged via RPC, log ID:', data);
     return { success: true, logId: data };
   } catch (error) {
+    console.error('[ActivityLog] Unexpected error:', error);
     return { success: false, error };
   }
 };
@@ -109,8 +218,11 @@ export const ActionTypes = {
   INVOICE_UPDATED: 'invoice_updated',
   INVOICE_DELETED: 'invoice_deleted',
   INVOICE_SENT: 'invoice_sent',
+  INVOICE_RESENT: 'invoice_resent',
   INVOICE_STATUS_CHANGED: 'invoice_status_changed',
   INVOICE_PAID: 'invoice_paid',
+  INVOICE_CANCELLED: 'invoice_cancelled',
+  INVOICE_VIEWED: 'invoice_viewed',
   
   // System
   LOGIN: 'login',

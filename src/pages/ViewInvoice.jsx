@@ -16,15 +16,18 @@ import {
   message as antMessage,
   Modal,
   Alert,
-  Popconfirm
+  Popconfirm,
+  Tooltip,
+  Typography
 } from 'antd';
-import { DeleteOutlined, PlusOutlined, SaveOutlined, SendOutlined, ArrowLeftOutlined, EditOutlined, LinkOutlined, MailOutlined, DownloadOutlined, CopyOutlined, EyeOutlined, WarningOutlined, CloseOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, SaveOutlined, SendOutlined, ArrowLeftOutlined, EditOutlined, LinkOutlined, MailOutlined, DownloadOutlined, CopyOutlined, EyeOutlined, WarningOutlined, CloseOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { mozelloService } from '../services/mozelloService';
 import { stripeService } from '../services/stripeService';
 import { useUserRole } from '../hooks/useUserRole';
+import { logInvoiceAction, ActionTypes } from '../services/activityLogService';
 import dayjs from 'dayjs';
 
 const { Option } = Select;
@@ -87,7 +90,25 @@ const ViewInvoice = () => {
         return;
       }
 
-      setInvoice(invoiceData);
+      // Fetch creator's profile to check their role
+      let creatorProfile = null;
+      if (invoiceData.user_id) {
+        const { data: creatorData, error: creatorError } = await supabase
+          .from('user_profiles')
+          .select('id, username, email, role')
+          .eq('id', invoiceData.user_id)
+          .maybeSingle();
+        
+        if (!creatorError && creatorData) {
+          creatorProfile = creatorData;
+        }
+      }
+
+      // Add creator info to invoice data
+      setInvoice({
+        ...invoiceData,
+        creator: creatorProfile
+      });
 
       // Fetch invoice items
       const { data: itemsData, error: itemsError } = await supabase
@@ -301,6 +322,23 @@ const ViewInvoice = () => {
         .insert(invoiceItems);
 
       if (itemsError) throw itemsError;
+
+      // Log invoice update
+      const isOwnInvoice = invoice.user_id === userProfile?.id;
+      await logInvoiceAction(
+        ActionTypes.INVOICE_UPDATED,
+        `Rediģēts rēķins ${invoice.invoice_number}${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
+        {
+          invoice_number: invoice.invoice_number,
+          customer_name: formValues.clientName,
+          total_amount: parseFloat(calculateTotal()),
+          is_own_invoice: isOwnInvoice,
+          is_other_user_invoice: !isOwnInvoice,
+          creator_username: invoice.creator?.username || 'Nezināms',
+          modified_by: userProfile?.username || 'Nezināms',
+        },
+        invoice.id
+      );
 
       setSaving(false);
       message.success('Izmaiņas saglabātas!');
@@ -656,8 +694,8 @@ const ViewInvoice = () => {
       return;
     }
 
-    // Check cooldown (5 minutes = 300000ms)
-    const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+    // Check cooldown (10 minutes = 600000ms)
+    const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
     if (lastEmailSent) {
       const timeSinceLastEmail = Date.now() - lastEmailSent;
       if (timeSinceLastEmail < COOLDOWN_MS) {
@@ -730,6 +768,13 @@ const ViewInvoice = () => {
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        // Handle 429 (Too Many Requests) with cooldown message
+        if (response.status === 429) {
+          const cooldownError = new Error(errorData.message || errorData.error || 'Cooldown active');
+          cooldownError.status = 429;
+          cooldownError.cooldownRemaining = errorData.cooldownRemaining;
+          throw cooldownError;
+        }
         throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
@@ -737,6 +782,7 @@ const ViewInvoice = () => {
 
       // ALWAYS update status to 'sent' unconditionally (regardless of email success)
       const sentAt = new Date().toISOString();
+      const oldStatus = invoice.status;
       const { error: updateError } = await supabase
         .from('invoices')
         .update({ 
@@ -745,9 +791,34 @@ const ViewInvoice = () => {
         })
         .eq('id', invoice.id);
       
-        if (!updateError) {
+      if (!updateError) {
         // Update local state instead of fetching to prevent modal flicker
         setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
+        
+        // Log invoice sent (first time) or resent
+        const isOwnInvoice = invoice.user_id === userProfile?.id;
+        const actionType = oldStatus === 'sent' ? ActionTypes.INVOICE_RESENT : ActionTypes.INVOICE_SENT;
+        const description = oldStatus === 'sent' 
+          ? `Nosūtīts rēķins ${invoice.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`
+          : `Nosūtīts rēķins ${invoice.invoice_number} klientam${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`;
+        
+        await logInvoiceAction(
+          actionType,
+          description,
+          {
+            invoice_number: invoice.invoice_number,
+            old_invoice_status: oldStatus,
+            new_invoice_status: 'sent',
+            customer_name: invoice.customer_name,
+            customer_email: invoice.customer_email,
+            total_amount: parseFloat(invoice.total || 0),
+            is_own_invoice: isOwnInvoice,
+            is_other_user_invoice: !isOwnInvoice,
+            creator_username: invoice.creator?.username || 'Nezināms',
+            sent_by: userProfile?.username || 'Nezināms',
+          },
+          invoice.id
+        );
       }
 
       // Update last email sent time
@@ -764,7 +835,13 @@ const ViewInvoice = () => {
       
       // Keep modal open - don't close it
     } catch (error) {
-      message.error('Neizdevās nosūtīt e-pastu');
+      // Handle cooldown errors specifically
+      if (error.status === 429 || error.message?.includes('Cooldown') || error.message?.includes('wait')) {
+        const errorMessage = error.message || 'Lūdzu, uzgaidiet pirms nākamās nosūtīšanas.';
+        message.warning(errorMessage);
+      } else {
+        message.error('Neizdevās nosūtīt e-pastu');
+      }
       
       // Still update status to 'sent' even if email fails
       try {
@@ -780,6 +857,27 @@ const ViewInvoice = () => {
         if (!updateError) {
           // Update local state instead of fetching to prevent modal flicker
           setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
+          
+          // Log invoice sent even if email failed
+          const isOwnInvoice = invoice.user_id === userProfile?.id;
+          await logInvoiceAction(
+            ActionTypes.INVOICE_SENT,
+            `Nosūtīts rēķins ${invoice.invoice_number} klientam (e-pasts var nebūt nosūtīts)${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
+            {
+              invoice_number: invoice.invoice_number,
+              old_invoice_status: invoice.status,
+              new_invoice_status: 'sent',
+              customer_name: invoice.customer_name,
+              customer_email: invoice.customer_email,
+              total_amount: parseFloat(invoice.total || 0),
+              is_own_invoice: isOwnInvoice,
+              is_other_user_invoice: !isOwnInvoice,
+              creator_username: invoice.creator?.username || 'Nezināms',
+              sent_by: userProfile?.username || 'Nezināms',
+              email_send_failed: true,
+            },
+            invoice.id
+          );
         }
       } catch (statusError) {
         // Error updating status after email failure
@@ -802,7 +900,11 @@ const ViewInvoice = () => {
     return <Tag color={config.color}>{config.label}</Tag>;
   };
 
-  const canEdit = invoice?.status === 'draft' && (invoice?.user_id === userProfile?.id || isSuperAdmin);
+  // Admin (not super_admin) can edit invoices created by employees
+  const isAdminOnly = isAdmin && !isSuperAdmin;
+  const creatorIsEmployee = invoice?.creator?.role === 'employee';
+  const canEditAsAdmin = isAdminOnly && creatorIsEmployee;
+  const canEdit = invoice?.status === 'draft' && (invoice?.user_id === userProfile?.id || isSuperAdmin || canEditAsAdmin);
   const isReadOnly = !isEditing || invoice?.status !== 'draft';
 
   if (loading) {
@@ -957,13 +1059,28 @@ const ViewInvoice = () => {
               >
                 Atpakaļ
               </Button>
-              <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }}>
-                {isEditing ? 'Rediģēt rēķinu' : 'Skatīt rēķinu'}
-              </h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }}>
+                  {isEditing ? 'Rediģēt rēķinu' : 'Skatīt rēķinu'}
+                </h1>
+                <Tooltip 
+                  title={
+                    <div style={{ maxWidth: '300px' }}>
+                      <div style={{ fontWeight: 600, marginBottom: '8px' }}>Rēķina skatīšana</div>
+                      <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                        Šeit varat skatīt pilnu rēķina informāciju. Melnraksta rēķinus var rediģēt. Nosūtītos rēķinus var koplietot ar klientiem e-pastā vai kopējot saiti. Kad rēķins ir gatavs, noklikšķiniet "Gatavs nosūtīšanai", lai atjauninātu statusu un izveidotu maksājuma saiti.
+                      </div>
+                    </div>
+                  }
+                  placement="right"
+                >
+                  <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+                </Tooltip>
+              </div>
             </div>
             <Space>
-              {/* Show "Ready to Send" button for draft invoices when not editing (only creator or super_admin) */}
-              {invoice?.status === 'draft' && !isEditing && (invoice?.user_id === userProfile?.id || isSuperAdmin) && (
+              {/* Show "Ready to Send" button for draft invoices when not editing (creator, super_admin, or admin for employee invoices) */}
+              {invoice?.status === 'draft' && !isEditing && (invoice?.user_id === userProfile?.id || isSuperAdmin || canEditAsAdmin) && (
                 <Button 
                   type="primary"
                   icon={<SendOutlined />} 

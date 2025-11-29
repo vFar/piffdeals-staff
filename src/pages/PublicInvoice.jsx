@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { App, Spin, Button, Result } from 'antd';
-import { CreditCardOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { useParams } from 'react-router-dom';
+import { Spin, Button, message as antMessage, Result } from 'antd';
+import { CreditCardOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase';
 import { mozelloService } from '../services/mozelloService';
 import dayjs from 'dayjs';
 
 const PublicInvoice = () => {
   const { token } = useParams();
-  const [searchParams] = useSearchParams();
-  const { message } = App.useApp();
   const [loading, setLoading] = useState(true);
   const [invoice, setInvoice] = useState(null);
   const [items, setItems] = useState([]);
@@ -21,34 +19,6 @@ const PublicInvoice = () => {
       fetchInvoiceByToken();
     }
   }, [token]);
-
-  // Show success message if returning from Stripe payment
-  useEffect(() => {
-    const paymentStatus = searchParams.get('payment');
-    if (paymentStatus === 'success') {
-      message.success({
-        content: 'Maksājums veiksmīgi apstrādāts! Paldies par maksājumu.',
-        duration: 8,
-        icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
-      });
-      // Refresh invoice data to get updated status (webhook should have updated it)
-      if (token) {
-        // Refresh immediately and then again after a delay to catch webhook update
-        fetchInvoiceByToken();
-        setTimeout(() => {
-          fetchInvoiceByToken();
-        }, 3000);
-      }
-      // Remove the payment=success parameter from URL after showing message
-      const newUrl = window.location.pathname + window.location.search.replace(/[?&]payment=success/, '');
-      window.history.replaceState({}, '', newUrl);
-    } else if (paymentStatus === 'cancelled') {
-      message.warning('Maksājums tika atcelts. Varat mēģināt vēlreiz.');
-      // Remove the payment=cancelled parameter from URL
-      const newUrl = window.location.pathname + window.location.search.replace(/[?&]payment=cancelled/, '');
-      window.history.replaceState({}, '', newUrl);
-    }
-  }, [searchParams, token, message]);
 
   useEffect(() => {
     if (invoice) {
@@ -70,6 +40,7 @@ const PublicInvoice = () => {
         .maybeSingle();
 
       if (invoiceError) {
+        console.error('Error fetching invoice:', invoiceError);
         setNotFound(true);
         return;
       }
@@ -101,11 +72,9 @@ const PublicInvoice = () => {
       // Fetch product images from Mozello API
       await fetchProductImages(itemsData || []);
 
-      // Payment link should already be created when "Gatavs nosūtīšanai" is clicked
-      // No need to auto-create here
-
     } catch (error) {
-      message.error('Neizdevās ielādēt rēķinu');
+      console.error('Error loading invoice:', error);
+      antMessage.error('Neizdevās ielādēt rēķinu');
       setNotFound(true);
     } finally {
       setLoading(false);
@@ -137,18 +106,16 @@ const PublicInvoice = () => {
 
       setProductsData(productsMap);
     } catch (error) {
+      console.error('Error fetching product images:', error);
       // Don't show error to user, just continue without images
     }
   };
 
-
   const handlePayInvoice = () => {
-    // Payment link should already exist when status is 'sent'
-    // Just open it in a new tab
     if (invoice?.stripe_payment_link) {
       window.open(invoice.stripe_payment_link, '_blank');
     } else {
-      message.error('Maksājuma saite nav pieejama. Lūdzu, sazinieties ar uzņēmumu.');
+      antMessage.error('Maksājuma saite nav pieejama');
     }
   };
 
@@ -245,44 +212,6 @@ const PublicInvoice = () => {
         }
       `}</style>
 
-      {/* Payment Success Banner - Hidden on print */}
-      {searchParams.get('payment') === 'success' && (
-        <div className="no-print" style={{ 
-          maxWidth: 900,
-          margin: '24px auto',
-          padding: '0 48px',
-        }}>
-          <div style={{
-            padding: '20px 24px',
-            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-            borderRadius: '12px',
-            color: 'white',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-            marginBottom: '16px',
-          }}>
-            <CheckCircleOutlined style={{ fontSize: '32px' }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '4px' }}>
-                Maksājums veiksmīgi apstrādāts!
-              </div>
-              <div style={{ fontSize: '14px', opacity: 0.9 }}>
-                Paldies par maksājumu. Jūsu rēķins tiks atjaunināts tūlīt.
-              </div>
-            </div>
-            <Button
-              type="text"
-              onClick={() => window.close()}
-              style={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
-            >
-              Aizvērt
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Action Buttons - Hidden on print */}
       <div className="no-print" style={{ 
         maxWidth: 900,
@@ -290,44 +219,19 @@ const PublicInvoice = () => {
         padding: '0 48px',
         display: 'flex',
         gap: '12px',
-        justifyContent: 'flex-end',
-        flexDirection: 'column',
-        alignItems: 'flex-end'
+        justifyContent: 'flex-end'
       }}>
-        {(() => {
-          const hasPaymentLink = !!invoice?.stripe_payment_link;
-          const canShowButton = invoice?.status !== 'paid' && invoice?.status !== 'cancelled';
-          
-          // Only show button if payment link exists
-          // Payment link should be created when "Gatavs nosūtīšanai" is clicked
-          if (!hasPaymentLink && canShowButton) {
-            return (
-              <div style={{ 
-                padding: '12px 16px', 
-                background: '#fff7e6', 
-                border: '1px solid #ffd591',
-                borderRadius: '6px',
-                color: '#ad6800',
-                fontSize: '14px'
-              }}>
-                Maksājuma saite nav pieejama. Lūdzu, sazinieties ar uzņēmumu.
-              </div>
-            );
-          }
-          
-          // Show button if payment link exists
-          return hasPaymentLink && canShowButton ? (
-            <Button 
-              type="primary"
-              icon={<CreditCardOutlined />}
-              onClick={handlePayInvoice}
-              size="large"
-              style={{ background: '#10b981', borderColor: '#10b981' }}
-            >
-              Apmaksāt šeit
-            </Button>
-          ) : null;
-        })()}
+        {['sent', 'pending', 'overdue'].includes(invoice?.status) && invoice?.stripe_payment_link && (
+          <Button 
+            type="primary"
+            icon={<CreditCardOutlined />}
+            onClick={handlePayInvoice}
+            size="large"
+            style={{ background: '#10b981', borderColor: '#10b981' }}
+          >
+            Apmaksāt rēķinu
+          </Button>
+        )}
       </div>
 
       {/* Invoice Container */}
@@ -335,20 +239,18 @@ const PublicInvoice = () => {
         {/* Paid Watermark */}
         {invoice.status === 'paid' && (
           <div style={{
-            position: 'absolute',
+            position: 'fixed',
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%) rotate(-45deg)',
-            fontSize: '120px',
+            fontSize: '72px',
             fontWeight: 700,
-            color: 'rgba(16, 185, 129, 0.08)', // Very light green, more faded
+            color: 'rgba(16, 185, 129, 0.15)', // Light green
             pointerEvents: 'none',
-            zIndex: 1,
+            zIndex: 1000,
             whiteSpace: 'nowrap',
-            textShadow: '2px 2px 4px rgba(0,0,0,0.05)',
+            textShadow: '2px 2px 4px rgba(0,0,0,0.1)',
             userSelect: 'none',
-            width: '100%',
-            textAlign: 'center',
           }}>
             APMAKSĀTS
           </div>

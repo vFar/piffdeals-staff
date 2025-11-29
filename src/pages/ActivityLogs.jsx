@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Card, Table, Typography, Tag, Space, Select, DatePicker, Input, Spin, Empty } from 'antd';
-import { SearchOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Table, Typography, Tag, Space, Select, DatePicker, Input, Spin, Empty, Tooltip, Alert } from 'antd';
+import { SearchOutlined, FilterOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
@@ -19,6 +19,7 @@ const ActivityLogs = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedRole, setSelectedRole] = useState('all');
   const [dateRange, setDateRange] = useState(null);
+  const [error, setError] = useState(null);
   const { isSuperAdmin } = useUserRole();
 
   useEffect(() => {
@@ -35,15 +36,28 @@ const ActivityLogs = () => {
   const fetchLogs = async () => {
     try {
       setLoading(true);
+      setError(null);
       const { data, error } = await supabase
         .from('activity_logs')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(1000); // Limit to last 1000 logs for performance
 
-      if (error) throw error;
+      if (error) {
+        // Check if it's a permission error or table doesn't exist
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          setError('Darbību žurnāla tabula vēl nav izveidota. Lūdzu, izpildiet datubāzes shēmu.');
+        } else if (error.code === '42501' || error.message?.includes('permission')) {
+          setError('Nav piekļuves darbību žurnālam.');
+        } else {
+          setError(`Kļūda: ${error.message}`);
+        }
+        setLogs([]);
+        return;
+      }
       setLogs(data || []);
     } catch (error) {
+      setError(`Kļūda: ${error.message}`);
       setLogs([]);
     } finally {
       setLoading(false);
@@ -100,20 +114,35 @@ const ActivityLogs = () => {
 
   const getActionTypeLabel = (actionType) => {
     const labels = {
-      'user_created': 'Lietotājs izveidots',
-      'user_updated': 'Lietotājs atjaunināts',
-      'user_deleted': 'Lietotājs dzēsts',
-      'role_changed': 'Loma mainīta',
-      'status_changed': 'Statuss mainīts',
-      'invoice_created': 'Rēķins izveidots',
-      'invoice_updated': 'Rēķins atjaunināts',
-      'invoice_deleted': 'Rēķins dzēsts',
-      'invoice_sent': 'Rēķins nosūtīts',
-      'bulk_action': 'Masveida darbība',
-      'login': 'Pieteikšanās',
-      'logout': 'Iziet',
-      'password_changed': 'Parole mainīta',
-      'password_reset_requested': 'Paroles maiņas pieprasījums nosūtīts',
+      // User management - user-friendly descriptions
+      'user_created': 'Izveidots jauns lietotāja konts',
+      'user_updated': 'Rediģēti lietotāja dati',
+      'user_deleted': 'Dzēsts lietotāja konts',
+      'role_changed': 'Mainīta lietotāja loma',
+      'status_changed': 'Mainīts lietotāja statuss',
+      'bulk_user_action': 'Masveida darbība ar lietotājiem',
+      'password_changed': 'Mainīta lietotāja parole',
+      'password_reset_requested': 'Nosūtīts paroles maiņas e-pasts',
+      
+      // Invoice management - user-friendly descriptions
+      'invoice_created': 'Izveidots jauns rēķins',
+      'invoice_updated': 'Rediģēts rēķins',
+      'invoice_deleted': 'Dzēsts rēķins',
+      'invoice_sent': 'Nosūtīts rēķins klientam',
+      'invoice_resent': 'Nosūtīts rēķins klientam vēlreiz',
+      'invoice_status_changed': 'Mainīts rēķina statuss',
+      'invoice_paid': 'Rēķins atzīmēts kā apmaksāts',
+      'invoice_cancelled': 'Rēķins atcelts',
+      'invoice_viewed': 'Skatīts rēķins',
+      
+      // System
+      'login': 'Pieteikšanās sistēmā',
+      'logout': 'Iziet no sistēmas',
+      'system_config_changed': 'Mainīti sistēmas iestatījumi',
+      
+      // Security
+      'unauthorized_access_attempt': 'Mēģinājums piekļūt bez atļaujas',
+      'suspicious_activity': 'Aizdomīga darbība',
     };
     return labels[actionType] || actionType;
   };
@@ -149,12 +178,28 @@ const ActivityLogs = () => {
   };
 
   const getRoleLabel = (role) => {
-    const labels = {
-      'employee': 'Darbinieks',
-      'admin': 'Administrators',
-      'super_admin': 'Super administrators',
-    };
-    return labels[role] || role;
+    if (!role) return '';
+    // Normalize the role - handle both database values and any stored display values
+    const normalizedRole = String(role).toLowerCase().trim();
+    
+    // Map all possible variations to correct Latvian labels
+    if (normalizedRole === 'super_admin' || normalizedRole === 'super administrators' || normalizedRole.includes('super')) {
+      return 'Galvenais administrators';
+    }
+    if (normalizedRole === 'admin' || normalizedRole === 'administrators') {
+      return 'Administrators';
+    }
+    if (normalizedRole === 'employee' || normalizedRole === 'darbinieks') {
+      return 'Darbinieks';
+    }
+    
+    // If it's already in Latvian and correct, return as is
+    if (role === 'Galvenais administrators') return role;
+    if (role === 'Administrators') return role;
+    if (role === 'Darbinieks') return role;
+    
+    // Fallback - return the role as is (shouldn't happen)
+    return role;
   };
 
   const getRoleColor = (role) => {
@@ -166,6 +211,15 @@ const ActivityLogs = () => {
     return colors[role] || 'default';
   };
 
+  const getStatusLabel = (status) => {
+    const labels = {
+      'active': 'Aktīvs',
+      'inactive': 'Neaktīvs',
+      'suspended': 'Aizliegts',
+    };
+    return labels[status] || status;
+  };
+
   const formatDetails = (details) => {
     if (!details || typeof details !== 'object') return null;
     
@@ -173,13 +227,123 @@ const ActivityLogs = () => {
       const entries = Object.entries(details);
       if (entries.length === 0) return null;
       
+      // Format key names to Latvian - user-friendly labels
+      const keyLabels = {
+        // User management
+        'old_role': 'Vecā loma',
+        'new_role': 'Jaunā loma',
+        'old_status': 'Vecais statuss',
+        'new_status': 'Jaunais statuss',
+        'bulk_action': 'Masveida darbība',
+        'total_updated': 'Atjaunināti lietotāji',
+        'total_deleted': 'Dzēsti lietotāji',
+        'created_user_role': 'Izveidotā loma',
+        'created_user_status': 'Izveidotais statuss',
+        'deleted_user_role': 'Dzēstā loma',
+        'deleted_user_status': 'Dzēstais statuss',
+        
+        // Invoice management
+        'invoice_number': 'Rēķina numurs',
+        'old_invoice_status': 'Vecais statuss',
+        'new_invoice_status': 'Jaunais statuss',
+        'customer_name': 'Klients',
+        'total_amount': 'Summa',
+        'is_own_invoice': 'Savs rēķins',
+        'is_other_user_invoice': 'Cita lietotāja rēķins',
+        'creator_username': 'Izveidoja',
+        'modified_by': 'Mainīja',
+        'payment_method': 'Maksājuma veids',
+        
+        // General
+        'action_performed_by': 'Veica',
+        'target_user_role': 'Mērķa lietotāja loma',
+        'target_user_status': 'Mērķa lietotāja statuss',
+      };
+      
+      // Filter out ALL technical/internal fields - ONLY show user-friendly information
+      const filteredEntries = entries.filter(([key]) => {
+        const lowerKey = key.toLowerCase();
+        
+        // Explicitly hide ALL technical fields
+        if (lowerKey.includes('id') && !lowerKey.includes('invoice_number')) return false;
+        if (lowerKey.includes('email')) return false;
+        if (lowerKey.includes('username') && !lowerKey.includes('creator_username')) return false;
+        if (lowerKey.includes('user_id')) return false;
+        if (lowerKey.includes('target_') && !lowerKey.includes('target_user_role') && !lowerKey.includes('target_user_status')) return false;
+        if (lowerKey.includes('created_') && !lowerKey.includes('created_user_role') && !lowerKey.includes('created_user_status')) return false;
+        if (lowerKey.includes('deleted_') && !lowerKey.includes('deleted_user_role') && !lowerKey.includes('deleted_user_status')) return false;
+        if (lowerKey.includes('sent_by')) return false;
+        if (lowerKey.includes('by_admin')) return false;
+        if (lowerKey.includes('_admin')) return false;
+        if (lowerKey === 'admin') return false;
+        
+        // Allow user-friendly keys
+        const allowedKeys = [
+          'old_role', 'new_role', 'old_status', 'new_status', 
+          'bulk_action', 'total_updated', 'total_deleted',
+          'created_user_role', 'created_user_status',
+          'deleted_user_role', 'deleted_user_status',
+          'invoice_number', 'old_invoice_status', 'new_invoice_status',
+          'customer_name', 'total_amount', 'is_own_invoice', 'is_other_user_invoice',
+          'creator_username', 'modified_by', 'payment_method',
+          'action_performed_by', 'target_user_role', 'target_user_status'
+        ];
+        return allowedKeys.includes(key);
+      });
+      
+      if (filteredEntries.length === 0) return null;
+      
       return (
-        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-          {entries.map(([key, value]) => (
-            <div key={key} style={{ marginBottom: '2px' }}>
-              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-            </div>
-          ))}
+        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', lineHeight: '1.6' }}>
+          {filteredEntries.map(([key, value]) => {
+            const label = keyLabels[key] || key;
+            let displayValue = value;
+            
+            // Format role values
+            if (key.includes('role')) {
+              displayValue = getRoleLabel(String(value));
+            }
+            // Format status values (both user and invoice statuses)
+            else if (key.includes('status')) {
+              if (key.includes('invoice')) {
+                // Invoice status
+                const invoiceStatusLabels = {
+                  'draft': 'Melnraksts',
+                  'sent': 'Nosūtīts',
+                  'paid': 'Apmaksāts',
+                  'pending': 'Gaida',
+                  'overdue': 'Kavēts',
+                  'cancelled': 'Atcelts',
+                };
+                displayValue = invoiceStatusLabels[String(value)] || String(value);
+              } else {
+                // User status
+                displayValue = getStatusLabel(String(value));
+              }
+            }
+            // Format boolean values
+            else if (typeof value === 'boolean') {
+              displayValue = value ? 'Jā' : 'Nē';
+            }
+            // Format numbers (amounts)
+            else if (typeof value === 'number') {
+              if (key.includes('amount') || key.includes('total')) {
+                displayValue = `€${parseFloat(value).toFixed(2)}`;
+              } else {
+                displayValue = String(value);
+              }
+            }
+            else {
+              displayValue = String(value);
+            }
+            
+            return (
+              <div key={key} style={{ marginBottom: '4px' }}>
+                <span style={{ fontWeight: 500, color: '#374151' }}>{label}:</span>{' '}
+                <span>{displayValue}</span>
+              </div>
+            );
+          })}
         </div>
       );
     } catch {
@@ -192,29 +356,69 @@ const ActivityLogs = () => {
       title: 'Laiks',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 180,
-      render: (date) => dayjs(date).format('YYYY-MM-DD HH:mm:ss'),
+      width: 200,
+      render: (date) => {
+        const dateObj = dayjs(date);
+        const now = dayjs();
+        const diffDays = now.diff(dateObj, 'day');
+        
+        if (diffDays === 0) {
+          // Today - show time with seconds
+          return (
+            <div>
+              <div style={{ fontWeight: 500, color: '#111827' }}>Šodien</div>
+              <div style={{ fontSize: '12px', color: '#6b7280' }}>{dateObj.format('HH:mm:ss')}</div>
+            </div>
+          );
+        } else if (diffDays === 1) {
+          // Yesterday
+          return (
+            <div>
+              <div style={{ fontWeight: 500, color: '#111827' }}>Vakar</div>
+              <div style={{ fontSize: '12px', color: '#6b7280' }}>{dateObj.format('HH:mm:ss')}</div>
+            </div>
+          );
+        } else if (diffDays < 7) {
+          // This week - show day name
+          const dayNames = ['Svētdiena', 'Pirmdiena', 'Otrdiena', 'Trešdiena', 'Ceturtdiena', 'Piektdiena', 'Sestdiena'];
+          return (
+            <div>
+              <div style={{ fontWeight: 500, color: '#111827' }}>{dayNames[dateObj.day()]}</div>
+              <div style={{ fontSize: '12px', color: '#6b7280' }}>{dateObj.format('DD.MM.YYYY')}</div>
+              <div style={{ fontSize: '12px', color: '#6b7280' }}>{dateObj.format('HH:mm:ss')}</div>
+            </div>
+          );
+        } else {
+          // Older - show full date and time
+          return (
+            <div>
+              <div style={{ fontWeight: 500, color: '#111827' }}>{dateObj.format('DD.MM.YYYY')}</div>
+              <div style={{ fontSize: '12px', color: '#6b7280' }}>{dateObj.format('HH:mm:ss')}</div>
+            </div>
+          );
+        }
+      },
       sorter: (a, b) => dayjs(a.created_at).unix() - dayjs(b.created_at).unix(),
     },
     {
       title: 'Lietotājs',
       key: 'user',
-      width: 200,
-      render: (_, record) => (
-        <div>
-          <div style={{ fontWeight: 500, marginBottom: '4px' }}>
-            {record.user_username || record.user_email || 'Nezināms'}
+      width: 180,
+      render: (_, record) => {
+        const role = record.user_role ? getRoleLabel(record.user_role) : null;
+        return (
+          <div>
+            <div style={{ fontWeight: 500, marginBottom: '4px', color: '#111827' }}>
+              {record.user_username || 'Nezināms'}
+            </div>
+            {role && (
+              <Tag color={getRoleColor(record.user_role)} size="small">
+                {role}
+              </Tag>
+            )}
           </div>
-          <div style={{ fontSize: '12px', color: '#6b7280' }}>
-            {record.user_email}
-          </div>
-          {record.user_role && (
-            <Tag color={getRoleColor(record.user_role)} size="small" style={{ marginTop: '4px' }}>
-              {getRoleLabel(record.user_role)}
-            </Tag>
-          )}
-        </div>
-      ),
+        );
+      },
     },
     {
       title: 'Darbība',
@@ -235,10 +439,12 @@ const ActivityLogs = () => {
       title: 'Apraksts',
       dataIndex: 'description',
       key: 'description',
-      ellipsis: true,
+      ellipsis: { showTitle: false },
       render: (text, record) => (
         <div>
-          <div>{text}</div>
+          <div style={{ color: '#111827', lineHeight: '1.5', marginBottom: record.details ? '8px' : '0' }}>
+            {text}
+          </div>
           {formatDetails(record.details)}
         </div>
       ),
@@ -274,7 +480,7 @@ const ActivityLogs = () => {
     return (
       <DashboardLayout>
         <Card>
-          <Empty description="Nav piekļuves" />
+          <Empty description="Nav piekļuves. Šo lapu var skatīt tikai galvenais administrators." />
         </Card>
       </DashboardLayout>
     );
@@ -283,9 +489,24 @@ const ActivityLogs = () => {
   return (
     <DashboardLayout>
       <div style={{ marginBottom: '24px' }}>
-        <Title level={2} style={{ margin: 0, marginBottom: '8px' }}>
-          Darbību žurnāls
-        </Title>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+          <Title level={2} style={{ margin: 0 }}>
+            Darbību žurnāls
+          </Title>
+          <Tooltip 
+            title={
+              <div style={{ maxWidth: '300px' }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px' }}>Darbību žurnāls</div>
+                <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                  Šeit tiek reģistrētas visas nozīmīgās darbības sistēmā: lietotāju izveide, rediģēšana, dzēšana, rēķinu izveide, nosūtīšana, lomas maiņa, statusa maiņa un drošības notikumi. Varat filtrēt pēc darbības veida, kategorijas, lomas un datuma diapazona. Pieejams tikai galvenajam administratoram.
+                </div>
+              </div>
+            }
+            placement="right"
+          >
+            <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+          </Tooltip>
+        </div>
         <Text type="secondary">
           Pārskats par visām nozīmīgajām darbībām, kas veiktas sistēmā
         </Text>
@@ -426,6 +647,19 @@ const ActivityLogs = () => {
             </div>
           </Card>
         </div>
+
+        {/* Error Message */}
+        {error && (
+          <Alert
+            message="Kļūda"
+            description={error}
+            type="error"
+            showIcon
+            closable
+            onClose={() => setError(null)}
+            style={{ marginBottom: '24px' }}
+          />
+        )}
 
         {/* Table */}
         <Table

@@ -165,7 +165,7 @@ const DashboardLayout = ({ children }) => {
             const roleConfig = {
               employee: { label: 'Darbinieks', color: '#6366f1', bg: '#eef2ff' },
               admin: { label: 'Administrators', color: '#8b5cf6', bg: '#f3e8ff' },
-              super_admin: { label: 'Super administrators', color: '#ec4899', bg: '#fce7f3' },
+              super_admin: { label: 'Galvenais administrators', color: '#ec4899', bg: '#fce7f3' },
             };
             const role = roleConfig[user.role] || { label: user.role, color: '#6b7280', bg: '#f3f4f6' };
 

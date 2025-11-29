@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Card, Row, Col, Table, Typography, Select, Spin } from 'antd';
+import { Card, Row, Col, Table, Typography, Select, Spin, Tooltip } from 'antd';
+import { InfoCircleOutlined } from '@ant-design/icons';
 import {
   Chart,
   CategoryScale,
@@ -11,7 +12,7 @@ import {
   LineController,
   DoughnutController,
   Title as ChartTitle,
-  Tooltip,
+  Tooltip as ChartTooltip,
   Legend,
   Filler,
 } from 'chart.js';
@@ -30,7 +31,7 @@ Chart.register(
   LineController,
   DoughnutController,
   ChartTitle,
-  Tooltip,
+  ChartTooltip,
   Legend,
   Filler
 );
@@ -500,6 +501,16 @@ const Dashboard = () => {
     };
   }, [dashboardData.invoiceStatusData, isAdmin, isSuperAdmin]);
 
+  // Format date with leading zeros
+  const formatDate = (dateString) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}.${month}.${year}`;
+  };
+
   const invoiceColumns = [
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Rēķina ID</span>,
@@ -523,7 +534,7 @@ const Dashboard = () => {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Datums</span>,
       dataIndex: 'issue_date',
       key: 'issue_date',
-      render: (text) => <Text style={{ color: '#6b7280' }}>{text ? new Date(text).toLocaleDateString('lv-LV') : '-'}</Text>,
+      render: (text) => <Text style={{ color: '#6b7280' }}>{formatDate(text)}</Text>,
     },
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Kopā</span>,
@@ -587,9 +598,24 @@ const Dashboard = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
         {/* Page Header */}
         <div>
-          <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
-            Informācijas panelis
-          </Title>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+            <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
+              Informācijas panelis
+            </Title>
+            <Tooltip 
+              title={
+                <div style={{ maxWidth: '300px' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '8px' }}>Informācijas panelis</div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                    Šeit redzams pārskats par jūsu rēķiniem un pārdošanu. Administrators redz visu sistēmas datu, bet darbinieki redz tikai savus rēķinus. Metrikas tiek aprēķinātas no apmaksātiem rēķiniem. Ienākumu izmaiņas tiek salīdzinātas ar iepriekšējo mēnesi.
+                  </div>
+                </div>
+              }
+              placement="right"
+            >
+              <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+            </Tooltip>
+          </div>
           <Text style={{ fontSize: '16px', color: '#6b7280', lineHeight: '1.5' }}>
             {userName ? `Laipni lūdzam atpakaļ, ${userName}!` : 'Laipni lūdzam atpakaļ!'}
           </Text>
@@ -780,11 +806,7 @@ const Dashboard = () => {
                             </Text>
                           )}
                           <Text style={{ fontSize: '12px', color: '#9ca3af' }}>
-                            {new Date(user.created_at).toLocaleDateString('lv-LV', {
-                              year: 'numeric',
-                              month: 'long',
-                              day: 'numeric',
-                            })}
+                            {formatDate(user.created_at)}
                           </Text>
                         </div>
                       </div>

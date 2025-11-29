@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Button, Empty, Spin, Modal, Input, message, Space } from 'antd';
+import { Card, Button, Empty, Spin, Modal, Input, message, Space, Tooltip, Typography } from 'antd';
 import { 
   EditOutlined, 
   DeleteOutlined, 
@@ -8,7 +8,8 @@ import {
   FileTextOutlined,
   MailOutlined,
   PhoneOutlined,
-  HomeOutlined
+  HomeOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
@@ -128,9 +129,24 @@ const InvoiceTemplates = () => {
     <DashboardLayout>
       <div style={{ maxWidth: 1400, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }}>
-            Mani paraugi
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }}>
+              Mani paraugi
+            </h1>
+            <Tooltip 
+              title={
+                <div style={{ maxWidth: '300px' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '8px' }}>Rēķinu paraugi</div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                    Saglabājiet bieži izmantoto klientu datus kā paraugus, lai ātri izveidotu jaunus rēķinus. Paraugos tiek saglabāti tikai klienta dati (vārds, e-pasts, telefons, adrese) un piezīmes. Produkti netiek saglabāti - tos būs jāpievieno katru reizi.
+                  </div>
+                </div>
+              }
+              placement="right"
+            >
+              <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+            </Tooltip>
+          </div>
           <Button
             type="primary"
             icon={<PlusOutlined />}

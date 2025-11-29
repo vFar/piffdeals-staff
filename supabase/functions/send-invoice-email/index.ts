@@ -184,14 +184,14 @@ serve(async (req) => {
       );
     }
 
-    // SECURITY: Rate limiting - prevent email spam (5 minutes cooldown)
+    // SECURITY: Rate limiting - prevent email spam (10 minutes cooldown)
     if (invoice.last_invoice_email_sent) {
       const lastSent = new Date(invoice.last_invoice_email_sent);
       const now = new Date();
       const minutesSinceLastSent = (now.getTime() - lastSent.getTime()) / (1000 * 60);
       
-      if (minutesSinceLastSent < 5) {
-        const remainingMinutes = Math.ceil(5 - minutesSinceLastSent);
+      if (minutesSinceLastSent < 10) {
+        const remainingMinutes = Math.ceil(10 - minutesSinceLastSent);
         return new Response(
           JSON.stringify({ 
             error: 'Cooldown active',

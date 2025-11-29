@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Card, Row, Col, Table, Typography, Select, Spin, DatePicker, Statistic, Empty } from 'antd';
+import { Card, Row, Col, Table, Typography, Select, Spin, DatePicker, Statistic, Empty, Tooltip } from 'antd';
+import { InfoCircleOutlined } from '@ant-design/icons';
 import {
   Chart,
   CategoryScale,
@@ -12,7 +13,7 @@ import {
   DoughnutController,
   BarController,
   Title as ChartTitle,
-  Tooltip,
+  Tooltip as ChartTooltip,
   Legend,
   Filler,
 } from 'chart.js';
@@ -32,7 +33,7 @@ Chart.register(
   DoughnutController,
   BarController,
   ChartTitle,
-  Tooltip,
+  ChartTooltip,
   Legend,
   Filler
 );
@@ -769,9 +770,24 @@ const SalesCharts = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
         {/* Page Header */}
         <div>
-          <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
-            Pārdošanas grafiki
-          </Title>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+            <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
+              Pārdošanas grafiki
+            </Title>
+            <Tooltip 
+              title={
+                <div style={{ maxWidth: '300px' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '8px' }}>Pārdošanas analīze</div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
+                    Šeit varat skatīt detalizētu pārdošanas analīzi ar grafikiem un statistiku. Varat filtrēt pēc laika perioda, darbinieka (tikai administratoriem) un rēķina statusa. Ienākumi tiek aprēķināti tikai no apmaksātiem rēķiniem. Administratori redz visu sistēmas datu, bet darbinieki redz tikai savus rēķinus.
+                  </div>
+                </div>
+              }
+              placement="right"
+            >
+              <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
+            </Tooltip>
+          </div>
           <Text style={{ fontSize: '16px', color: '#6b7280', lineHeight: '1.5' }}>
             Detalizēta pārdošanas analīze un statistika
           </Text>
