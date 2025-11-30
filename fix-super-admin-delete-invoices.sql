@@ -25,3 +25,4 @@ CREATE POLICY "Users can delete invoices"
     )
   );
 
+

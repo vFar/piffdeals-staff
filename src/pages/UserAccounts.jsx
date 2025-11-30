@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, Table, Typography, Breadcrumb, Tag, Space, message, Spin, Modal, Form, Input, Select, Button, Popconfirm, Dropdown, App, Tooltip } from 'antd';
 import { PlusOutlined, MoreOutlined, SearchOutlined, UserSwitchOutlined, DeleteOutlined, EditOutlined, MailOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
@@ -11,6 +12,11 @@ const { Title, Text } = Typography;
 const { Option } = Select;
 
 const UserAccounts = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const highlightUserId = searchParams.get('highlight');
+  const tableRef = useRef(null);
+  const [highlightedUserId, setHighlightedUserId] = useState(null);
+  
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -35,6 +41,75 @@ const UserAccounts = () => {
       fetchUsers();
     }
   }, [isAdmin, isSuperAdmin]);
+
+  // Handle user highlighting from search
+  useEffect(() => {
+    if (!highlightUserId) return;
+    
+    // Wait for users to be loaded and initial load to complete
+    if (loading || initialLoad || users.length === 0) return;
+    
+    // Check if user exists in the list (check both users and filteredUsers)
+    const userExists = users.some(u => u.id === highlightUserId);
+    const userInFiltered = filteredUsers.some(u => u.id === highlightUserId);
+    
+    if (userExists) {
+      setHighlightedUserId(highlightUserId);
+      
+      // If user is not in filtered list, clear search to show them
+      if (!userInFiltered && searchText) {
+        setSearchText('');
+        // Wait for filteredUsers to update
+        setTimeout(() => {
+          scrollToHighlightedUser();
+        }, 100);
+      } else {
+        scrollToHighlightedUser();
+      }
+    } else {
+      // User not found, remove query parameter
+      const newSearchParams = new URLSearchParams(searchParams);
+      newSearchParams.delete('highlight');
+      setSearchParams(newSearchParams, { replace: true });
+    }
+    
+    function scrollToHighlightedUser() {
+      // Use multiple attempts with increasing delays to find the row
+      const attemptScroll = (attempt = 0) => {
+        const maxAttempts = 5;
+        if (attempt >= maxAttempts) {
+          // Give up after max attempts
+          const newSearchParams = new URLSearchParams(searchParams);
+          newSearchParams.delete('highlight');
+          setSearchParams(newSearchParams, { replace: true });
+          return;
+        }
+        
+        // Try multiple selectors to find the row
+        const rowElement = document.querySelector(`tr[data-user-id="${highlightUserId}"]`) ||
+                          document.querySelector(`.ant-table-tbody tr[data-user-id="${highlightUserId}"]`) ||
+                          document.querySelector(`[data-user-id="${highlightUserId}"]`);
+        
+        if (rowElement) {
+          rowElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          
+          // Remove highlight after 5 seconds
+          setTimeout(() => {
+            setHighlightedUserId(null);
+            const newSearchParams = new URLSearchParams(searchParams);
+            newSearchParams.delete('highlight');
+            setSearchParams(newSearchParams, { replace: true });
+          }, 5000);
+        } else {
+          // Row not found yet, try again
+          setTimeout(() => attemptScroll(attempt + 1), 300 * (attempt + 1));
+        }
+      };
+      
+      // Start attempting to scroll after a short delay
+      setTimeout(() => attemptScroll(0), 300);
+    }
+  }, [highlightUserId, users, filteredUsers, loading, initialLoad, searchText, searchParams, setSearchParams]);
 
   // Search filter effect
   useEffect(() => {
@@ -1427,7 +1502,7 @@ const UserAccounts = () => {
             </div>
           ) : (
             <>
-              <div style={{ overflowX: 'auto' }}>
+              <div style={{ overflowX: 'auto' }} ref={tableRef}>
                 <Table
                   columns={columns}
                   dataSource={filteredUsers.map((user) => ({ ...user, key: user.id }))}
@@ -1445,7 +1520,19 @@ const UserAccounts = () => {
                     },
                   }}
                   className="custom-table"
-                  rowClassName="custom-table-row"
+                  rowClassName={(record) => {
+                    const baseClass = 'custom-table-row';
+                    if (highlightedUserId === record.id) {
+                      return `${baseClass} highlighted-row`;
+                    }
+                    return baseClass;
+                  }}
+                  onRow={(record) => {
+                    return {
+                      'data-user-id': record.id,
+                      'data-row-key': record.id,
+                    };
+                  }}
                 />
               </div>
             </>
@@ -1843,6 +1930,25 @@ const UserAccounts = () => {
 
         .custom-table .ant-table-tbody > tr.custom-table-row:hover {
           background: #f9fafb;
+        }
+
+        .custom-table .ant-table-tbody > tr.highlighted-row {
+          background: #fef3c7 !important;
+          border-left: 4px solid #f59e0b;
+          animation: highlightPulse 2s ease-in-out;
+        }
+
+        .custom-table .ant-table-tbody > tr.highlighted-row:hover {
+          background: #fde68a !important;
+        }
+
+        @keyframes highlightPulse {
+          0%, 100% {
+            background: #fef3c7;
+          }
+          50% {
+            background: #fde68a;
+          }
         }
 
         .action-button:hover {

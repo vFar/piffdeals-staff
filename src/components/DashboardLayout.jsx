@@ -145,7 +145,7 @@ const DashboardLayout = ({ children }) => {
             statusColor: status.color,
             statusBg: status.bg,
             amount: parseFloat(invoice.total || 0),
-            url: `/invoices/${invoice.id}`,
+            url: `/invoice/${encodeURIComponent(invoice.invoice_number)}`, // Encode invoice_number for URL
             icon: <FileTextOutlined />,
           });
         });
@@ -177,7 +177,7 @@ const DashboardLayout = ({ children }) => {
               metadata: role.label,
               statusColor: role.color,
               statusBg: role.bg,
-              url: '/user-accounts',
+              url: `/user-accounts?highlight=${user.id}`, // Add user ID as query parameter for highlighting
               icon: <TeamOutlined />,
             });
           });
@@ -257,6 +257,7 @@ const DashboardLayout = ({ children }) => {
     setSearchQuery('');
     setShowSearchResults(false);
     setSelectedIndex(-1);
+    // Navigate to the result URL
     navigate(result.url);
   };
 
@@ -601,6 +602,7 @@ const DashboardLayout = ({ children }) => {
               onChange={handleSearchChange}
               onFocus={handleSearchFocus}
               onKeyDown={handleSearchKeyDown}
+              allowClear
               style={{
                 background: showSearchResults ? '#ffffff' : '#f3f4f6',
                 border: showSearchResults ? '1px solid #0068FF' : 'none',
@@ -727,7 +729,7 @@ const DashboardLayout = ({ children }) => {
                                       textOverflow: 'ellipsis',
                                       whiteSpace: 'nowrap',
                                     }}>
-                                      #{result.title}
+                                      #{result.title?.toString().replace(/^#+/, '') || ''}
                                     </Text>
                                   </div>
                                   <Text style={{

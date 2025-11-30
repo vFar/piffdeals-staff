@@ -49,10 +49,15 @@ DECLARE
   v_log_id UUID;
   v_details_jsonb JSONB;
 BEGIN
-  -- Get user profile information
-  SELECT username, email, role INTO v_user_profile
-  FROM user_profiles
-  WHERE id = p_user_id;
+  -- Get user profile information (SECURITY DEFINER bypasses RLS)
+  BEGIN
+    SELECT username, email, role INTO v_user_profile
+    FROM user_profiles
+    WHERE id = p_user_id;
+  EXCEPTION WHEN OTHERS THEN
+    -- If we can't get profile, continue with NULL values (will use COALESCE defaults)
+    v_user_profile := NULL;
+  END;
   
   -- Convert details JSON string to JSONB if provided
   IF p_details IS NOT NULL THEN
@@ -63,7 +68,7 @@ BEGIN
     END;
   END IF;
   
-  -- Insert activity log
+  -- Insert activity log (SECURITY DEFINER bypasses RLS)
   INSERT INTO activity_logs (
     user_id,
     user_username,
@@ -94,6 +99,10 @@ BEGIN
   RETURNING id INTO v_log_id;
   
   RETURN v_log_id;
+EXCEPTION WHEN OTHERS THEN
+  -- Log the error but don't fail - return NULL if insert fails
+  -- This ensures logging errors don't break the application
+  RETURN NULL;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

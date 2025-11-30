@@ -1,2 +1,6 @@
+# Allow images to be served directly (no redirect)
+/images/*    200
+
+# Catch-all: redirect everything else to index.html for SPA routing
 /*    /index.html   200
 

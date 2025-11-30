@@ -632,6 +632,7 @@ const ViewInvoice = () => {
     // Reset notification tracking when opening modal (customer not notified yet)
     setCustomerNotified(false);
     setShareMethodModal(true);
+    message.success('Rēķina statuss nomainīts uz Nosūtīts');
     
     // Then update status and create payment link in the background (non-blocking)
     (async () => {

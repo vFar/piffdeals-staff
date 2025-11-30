@@ -25,6 +25,7 @@ const Invoices = () => {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [lastEmailSent, setLastEmailSent] = useState(null);
+  const [emailCooldown, setEmailCooldown] = useState(0);
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
   const { notifyEmailSendFailed, notifyInvoicePaid } = useNotifications();
 
@@ -238,135 +239,330 @@ const Invoices = () => {
   };
 
   const handleSendEmailResend = async () => {
+    // Validation
     if (!selectedInvoice?.public_token || !selectedInvoice?.customer_email) {
-      message.error('Nav iespējams nosūtīt e-pastu');
+      message.error({
+        content: 'Nav iespējams nosūtīt e-pastu: trūkst rēķina datu vai e-pasta adreses.',
+        duration: 5,
+      });
       return;
     }
 
-    // Check cooldown (10 minutes = 600000ms)
-    const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
-    if (lastEmailSent) {
-      const timeSinceLastEmail = Date.now() - lastEmailSent;
-      if (timeSinceLastEmail < COOLDOWN_MS) {
-        const remainingSeconds = Math.ceil((COOLDOWN_MS - timeSinceLastEmail) / 1000);
-        const remainingMinutes = Math.floor(remainingSeconds / 60);
-        const remainingSecs = remainingSeconds % 60;
-        message.warning(
-          `Lūdzu, uzgaidiet pirms nākamās nosūtīšanas. Atlikušas ${remainingMinutes} min ${remainingSecs} sek.`
-        );
-        return;
-      }
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(selectedInvoice.customer_email)) {
+      message.error({
+        content: 'E-pasta adrese nav derīga. Lūdzu, pārbaudiet e-pasta adresi.',
+        duration: 5,
+      });
+      return;
     }
 
     // Store invoice ID to preserve reference during updates
     const invoiceId = selectedInvoice.id;
     const currentInvoice = { ...selectedInvoice };
 
+    // Show loading message
+    const loadingMessage = message.loading({
+      content: 'Nosūta e-pastu...',
+      duration: 0, // Don't auto-close
+      key: 'sending-email',
+    });
+
     try {
       setSendingEmail(true);
       
-      // Get current session for authentication
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      // Get current session for authentication and refresh if needed
+      let { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      if (!session) {
+      // Check if session exists and token is still valid (not expired)
+      const isTokenExpired = session?.expires_at 
+        ? session.expires_at * 1000 < Date.now() + 60000 // Expires within 1 minute
+        : false;
+      
+      // If no session, session error, or token is expired/expiring soon, try to refresh
+      if (!session || sessionError || isTokenExpired || !session.access_token) {
+        console.log('Session expired or missing, attempting to refresh...');
+        
+        // Try to refresh the session
+        const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshedSession && refreshedSession.access_token) {
+          session = refreshedSession;
+          sessionError = null;
+          console.log('Session refreshed successfully');
+        } else if (refreshError) {
+          console.error('Failed to refresh session:', refreshError);
+          
+          // If refresh fails, user needs to log in again
+          // Clear any stale session data
+          await supabase.auth.signOut();
+          
+          throw new Error('Jūsu sesija ir beigusies. Lūdzu, pieslēdzieties atkārtoti.');
+        }
+      }
+      
+      // Final check - if still no session or no access token, throw error
+      if (!session || !session.access_token) {
+        console.error('No valid session after refresh attempt');
         throw new Error('Nav autentificēts. Lūdzu, pieslēdzieties atkārtoti.');
       }
       
-      // Call Supabase Edge Function to send email
+      console.log('Using session token (expires at:', session.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'unknown', ')');
+      
+      // Call Supabase Edge Function to send email with timeout
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, ''); // Remove trailing slash
       const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-invoice-email`;
       
-      const response = await fetch(edgeFunctionUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({
-          invoiceId: currentInvoice.id,
-          customerEmail: currentInvoice.customer_email,
-          customerName: currentInvoice.customer_name,
-          invoiceNumber: currentInvoice.invoice_number,
-          publicToken: currentInvoice.public_token,
-          total: currentInvoice.total
-        }),
-      });
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 35000); // 35 second timeout
+      
+      let response;
+      try {
+        response = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({
+            invoiceId: currentInvoice.id,
+            customerEmail: currentInvoice.customer_email,
+            customerName: currentInvoice.customer_name,
+            invoiceNumber: currentInvoice.invoice_number,
+            publicToken: currentInvoice.public_token,
+            total: currentInvoice.total
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        
+        // Handle timeout
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Pieprasījums aizņēma pārāk daudz laika. Lūdzu, mēģiniet vēlreiz.');
+        }
+        
+        // Handle network errors
+        if (fetchError.message?.includes('Failed to fetch') || fetchError.message?.includes('network')) {
+          throw new Error('Neizdevās izveidot savienojumu. Pārbaudiet interneta savienojumu un mēģiniet vēlreiz.');
+        }
+        
+        throw fetchError;
+      }
+      
+      // Parse response
+      let errorData = {};
+      let data = {};
+      
+      try {
+        const responseText = await response.text();
+        if (responseText) {
+          const parsed = JSON.parse(responseText);
+          if (!response.ok) {
+            errorData = parsed;
+          } else {
+            data = parsed;
+          }
+        }
+      } catch (parseError) {
+        // If response is not JSON, use status text
+        if (!response.ok) {
+          errorData = { error: response.statusText, message: response.statusText };
+        }
+      }
       
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        // Handle 429 (Too Many Requests) with cooldown message
+        // Handle specific error status codes
         if (response.status === 429) {
           const cooldownError = new Error(errorData.message || errorData.error || 'Cooldown active');
           cooldownError.status = 429;
           cooldownError.cooldownRemaining = errorData.cooldownRemaining;
+          cooldownError.errorType = 'cooldown'; // Always set to 'cooldown' for 429 errors
           throw cooldownError;
+        } else if (response.status === 401 || response.status === 403) {
+          const authError = new Error(errorData.message || 'Nav autentificēts');
+          authError.status = response.status;
+          authError.errorType = errorData.errorType || 'auth_error';
+          throw authError;
+        } else if (response.status === 404) {
+          const notFoundError = new Error(errorData.message || 'Rēķins nav atrasts');
+          notFoundError.status = 404;
+          notFoundError.errorType = errorData.errorType || 'not_found';
+          throw notFoundError;
+        } else if (response.status === 503 || response.status === 504) {
+          const serviceError = new Error(errorData.message || 'Serviss nav pieejams');
+          serviceError.status = response.status;
+          serviceError.errorType = errorData.errorType || 'service_unavailable';
+          throw serviceError;
+        } else {
+          const httpError = new Error(errorData.message || errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+          httpError.status = response.status;
+          httpError.errorType = errorData.errorType || 'http_error';
+          throw httpError;
         }
-        throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      // Verify response data
+      if (!data?.success && !data?.emailId) {
+        throw new Error('E-pasta serviss atgrieza negaidītu atbildi. E-pasts var nebūt nosūtīts.');
+      }
 
       // Log invoice resend
       const isOwnInvoice = currentInvoice.user_id === userProfile?.id;
-      await logInvoiceAction(
-        ActionTypes.INVOICE_RESENT,
-        `Nosūtīts rēķins ${currentInvoice.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
-        {
-          invoice_number: currentInvoice.invoice_number,
-          customer_name: currentInvoice.customer_name,
-          customer_email: currentInvoice.customer_email,
-          total_amount: parseFloat(currentInvoice.total || 0),
-          is_own_invoice: isOwnInvoice,
-          is_other_user_invoice: !isOwnInvoice,
-          creator_username: currentInvoice.creator?.username || 'Nezināms',
-          resent_by: userProfile?.username || 'Nezināms',
-        },
-        invoiceId
-      );
+      try {
+        await logInvoiceAction(
+          ActionTypes.INVOICE_RESENT,
+          `Nosūtīts rēķins ${currentInvoice.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
+          {
+            invoice_number: currentInvoice.invoice_number,
+            customer_name: currentInvoice.customer_name,
+            customer_email: currentInvoice.customer_email,
+            total_amount: parseFloat(currentInvoice.total || 0),
+            is_own_invoice: isOwnInvoice,
+            is_other_user_invoice: !isOwnInvoice,
+            creator_username: currentInvoice.creator?.username || 'Nezināms',
+            resent_by: userProfile?.username || 'Nezināms',
+          },
+          invoiceId
+        );
+      } catch (logError) {
+        console.error('Failed to log invoice resend:', logError);
+        // Don't fail the entire operation if logging fails
+      }
 
       // Update invoice status to 'sent' if it's not already
       if (currentInvoice.status !== 'sent') {
-        const sentAt = new Date().toISOString();
-        const { error: updateError } = await supabase
-          .from('invoices')
-          .update({ 
-            status: 'sent',
-            sent_at: sentAt
-          })
-          .eq('id', invoiceId);
-        
-        if (!updateError) {
-          // Update selectedInvoice to reflect new status without closing modal
-          setSelectedInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
-          // Also update in invoices list to keep data in sync
-          setInvoices(prev => prev.map(inv => 
-            inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
-          ));
-          setFilteredInvoices(prev => prev.map(inv => 
-            inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
-          ));
+        try {
+          const sentAt = new Date().toISOString();
+          const { error: updateError } = await supabase
+            .from('invoices')
+            .update({ 
+              status: 'sent',
+              sent_at: sentAt
+            })
+            .eq('id', invoiceId);
+          
+          if (updateError) {
+            console.error('Failed to update invoice status:', updateError);
+            // Don't fail the entire operation if status update fails
+          } else {
+            // Update selectedInvoice to reflect new status without closing modal
+            setSelectedInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
+            // Also update in invoices list to keep data in sync
+            setInvoices(prev => prev.map(inv => 
+              inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
+            ));
+            setFilteredInvoices(prev => prev.map(inv => 
+              inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
+            ));
+          }
+        } catch (statusError) {
+          console.error('Error updating invoice status:', statusError);
+          // Don't fail the entire operation if status update fails
         }
       }
 
       // Update last email sent time
       setLastEmailSent(Date.now());
       
-      if (data?.success) {
-        message.success('E-pasts nosūtīts klientam!');
-      } else {
-        message.warning('E-pasts var nebūt nosūtīts, bet rēķina statuss ir atjaunināts.');
-      }
+      // Set cooldown to 10 minutes (600 seconds)
+      setEmailCooldown(600);
+      
+      // Update cooldown every second
+      const cooldownInterval = setInterval(() => {
+        setEmailCooldown((prev) => {
+          if (prev <= 1) {
+            clearInterval(cooldownInterval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      
+      // Close loading message and show success
+      message.destroy('sending-email');
+      message.success({
+        content: `E-pasts veiksmīgi nosūtīts uz ${currentInvoice.customer_email}!`,
+        duration: 5,
+      });
       
       // Keep modal open - don't close it
     } catch (error) {
-      // Handle cooldown errors specifically
-      if (error.status === 429 || error.message?.includes('Cooldown') || error.message?.includes('wait')) {
-        const errorMessage = error.message || 'Lūdzu, uzgaidiet pirms nākamās nosūtīšanas.';
-        message.warning(errorMessage);
+      // Close loading message
+      message.destroy('sending-email');
+      
+      // Categorize and handle different error types
+      let errorMessage = 'Nezināma kļūda';
+      let errorType = error?.errorType || 'unknown';
+      let showWarning = false;
+      
+      // Handle specific error types with user-friendly messages
+      if (error?.status === 429 || error?.message?.includes('Cooldown') || error?.message?.includes('wait') || error?.message?.includes('uzgaidiet') || error?.errorType === 'cooldown') {
+        // Try to extract cooldown from error message or response
+        let cooldownSeconds = 600; // Default 10 minutes
+        
+        // Try to extract from error message
+        const cooldownMatch = error?.message?.match(/(\d+)\s*minute/i);
+        if (cooldownMatch) {
+          cooldownSeconds = parseInt(cooldownMatch[1]) * 60;
+        }
+        
+        // Try to extract from error context/body
+        if (error?.cooldownRemaining) {
+          cooldownSeconds = error.cooldownRemaining;
+        }
+        
+        setEmailCooldown(cooldownSeconds);
+        
+        // Update cooldown every second
+        const cooldownInterval = setInterval(() => {
+          setEmailCooldown((prev) => {
+            if (prev <= 1) {
+              clearInterval(cooldownInterval);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+        
+        const minutes = Math.ceil(cooldownSeconds / 60);
+        errorMessage = `Lūdzu, uzgaidiet ${minutes} minūte(s) pirms nākamās sūtīšanas`;
+        showWarning = true;
+        errorType = 'cooldown';
+      } else if (error?.status === 401 || error?.status === 403 || error?.message?.includes('autentificēts') || error?.message?.includes('Nav tiesību')) {
+        errorMessage = error.message || 'Nav autentificēts. Lūdzu, pieslēdzieties atkārtoti.';
+        errorType = 'auth_error';
+      } else if (error?.status === 404 || error?.message?.includes('nav atrasts')) {
+        errorMessage = error.message || 'Rēķins nav atrasts. Lūdzu, pārbaudiet un mēģiniet vēlreiz.';
+        errorType = 'not_found';
+      } else if (error?.status === 503 || error?.status === 504 || error?.message?.includes('nav pieejams') || error?.message?.includes('timeout') || error?.message?.includes('aizņēma')) {
+        errorMessage = error.message || 'Serviss nav pieejams vai pieprasījums aizņēma pārāk daudz laika. Lūdzu, mēģiniet vēlreiz.';
+        errorType = 'service_unavailable';
+      } else if (error?.message?.includes('savienojumu') || error?.message?.includes('network') || error?.message?.includes('interneta')) {
+        errorMessage = error.message || 'Neizdevās izveidot savienojumu. Pārbaudiet interneta savienojumu.';
+        errorType = 'network_error';
+      } else if (error?.message?.includes('e-pasta adrese') || error?.message?.includes('email') || error?.message?.includes('validation')) {
+        errorMessage = error.message || 'E-pasta adrese nav derīga. Lūdzu, pārbaudiet e-pasta adresi.';
+        errorType = 'validation_error';
       } else {
-        const errorMessage = error.message || 'Nezināma kļūda';
-        message.error(`Neizdevās nosūtīt e-pastu: ${errorMessage}`);
+        errorMessage = error?.message || 'Neizdevās nosūtīt e-pastu. Lūdzu, mēģiniet vēlreiz.';
+      }
+      
+      // Show appropriate message type (skip warning for cooldown as it's handled by button state)
+      if (showWarning && errorType !== 'cooldown') {
+        message.warning({
+          content: errorMessage,
+          duration: 6,
+        });
+      } else if (errorType !== 'cooldown') {
+        message.error({
+          content: errorMessage,
+          duration: 6,
+        });
       }
       
       // Notify via notification system
@@ -375,6 +571,7 @@ const Invoices = () => {
       }
       
       // Still update status to 'sent' even if email fails (for resend scenarios)
+      // This allows users to manually share the link even if email fails
       if (currentInvoice.status !== 'sent') {
         try {
           const sentAt = new Date().toISOString();
@@ -397,8 +594,20 @@ const Invoices = () => {
             ));
           }
         } catch (statusError) {
-          // Error updating status after email failure
+          console.error('Error updating invoice status after email failure:', statusError);
+          // Don't show error to user - status update failure is not critical
         }
+      }
+      
+      // Log error for debugging (skip for cooldown errors as they're user-facing)
+      if (errorType !== 'cooldown') {
+        console.error('Send email error:', {
+          errorType,
+          message: error?.message,
+          status: error?.status,
+          invoiceId: currentInvoice.id,
+          customerEmail: currentInvoice.customer_email,
+        });
       }
     } finally {
       setSendingEmail(false);
@@ -1233,7 +1442,7 @@ const Invoices = () => {
                         color: '#6b7280',
                         lineHeight: 1.5
                       }}>
-                        Lūdzu, ņemiet vērā, ka e-pastu var nosūtīt tikai reizi 5 minūtēs, lai novērstu pārāk biežu nosūtīšanu.
+                        Lūdzu, ņemiet vērā, ka e-pastu var nosūtīt tikai reizi 10 minūtēs, lai novērstu pārāk biežu nosūtīšanu.
                       </p>
                     </div>
                   }
@@ -1247,7 +1456,7 @@ const Invoices = () => {
                   okButtonProps={{
                     style: { background: '#137fec', borderColor: '#137fec' }
                   }}
-                  disabled={sendingEmail}
+                  disabled={sendingEmail || emailCooldown > 0}
                   onOpenChange={(open) => {
                     // Prevent Popconfirm from affecting modal state
                     if (!open && sendingEmail) {
@@ -1256,26 +1465,35 @@ const Invoices = () => {
                   }}
                 >
                   <Button
-                    type="primary"
+                    type="default"
+                    icon={<MailOutlined />}
                     loading={sendingEmail}
-                    disabled={sendingEmail}
-                    className="share-modal-button"
+                    disabled={sendingEmail || emailCooldown > 0}
+                    block
                     style={{
-                      height: '48px',
-                      minWidth: '84px',
-                      width: '100%',
+                      height: '40px',
                       borderRadius: '8px',
-                      background: '#137fec',
-                      border: 'none',
-                      fontSize: '16px',
-                      fontWeight: 700,
-                      letterSpacing: '0.015em',
-                      padding: '0 20px'
+                      borderColor: '#0068FF',
+                      color: '#0068FF',
+                      fontWeight: 500,
+                      fontSize: '14px',
                     }}
                   >
-                    Nosūtīt e-pastu
+                    {emailCooldown > 0
+                      ? `Lūdzu, uzgaidiet ${Math.ceil(emailCooldown / 60)} min`
+                      : 'Nosūtīt e-pastu'}
                   </Button>
                 </Popconfirm>
+                {emailCooldown > 0 && (
+                  <div style={{ 
+                    marginTop: '8px', 
+                    fontSize: '12px', 
+                    color: '#6b7280',
+                    textAlign: 'center'
+                  }}>
+                    Atkārtota sūtīšana pieejama pēc {Math.ceil(emailCooldown / 60)} minūtēm
+                  </div>
+                )}
               </div>
             </div>
           </div>

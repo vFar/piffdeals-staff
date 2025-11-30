@@ -146,6 +146,9 @@ If you need to update environment variables later:
 - Go to Project Settings → Domains
 - Add your custom domain (e.g., `staff.piffdeals.lv`)
 - Configure DNS records as instructed by Vercel
+- **SSL/HTTPS is automatic!** Vercel provides SSL certificates for free
+- Wait 5-60 minutes for SSL certificate to be provisioned
+- See `VERCEL_SSL_SETUP.md` for detailed HTTPS setup guide
 
 ## Troubleshooting
 
@@ -177,6 +180,7 @@ For Vercel-specific issues:
 For project-specific issues:
 - Check `PROJECT_OVERVIEW.md` for project details
 - Review error logs in Vercel Dashboard
+
 
 
 
