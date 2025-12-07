@@ -6,6 +6,14 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/images/:path*",
+      "destination": "/images/:path*"
+    },
+    {
+      "source": "/assets/:path*",
+      "destination": "/assets/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

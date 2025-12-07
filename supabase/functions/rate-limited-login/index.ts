@@ -168,6 +168,35 @@ serve(async (req) => {
       // Non-critical error, continue
     }
 
+    // Log successful login activity with IP address
+    try {
+      // Get user profile for logging
+      const { data: userProfile } = await supabaseAdmin
+        .from('user_profiles')
+        .select('username, email, role')
+        .eq('id', authData.user.id)
+        .maybeSingle();
+
+      // Get user agent
+      const userAgent = req.headers.get('user-agent') || null;
+
+      // Log login activity with IP address
+      await supabaseAdmin.rpc('log_activity', {
+        p_user_id: authData.user.id,
+        p_action_type: 'login',
+        p_action_category: 'system',
+        p_description: 'Pieteikšanās sistēmā',
+        p_details: null,
+        p_target_type: 'system',
+        p_target_id: null,
+        p_ip_address: clientIP,
+        p_user_agent: userAgent,
+      });
+    } catch (logError) {
+      console.error('Error logging login activity:', logError);
+      // Non-critical error, continue
+    }
+
     // Return success with session data
     return new Response(
       JSON.stringify({

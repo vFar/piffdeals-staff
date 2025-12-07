@@ -42,9 +42,16 @@ const SessionTimeoutNotifier = () => {
       return;
     }
     
-    // Reset timeout flag when user logs in (fresh session)
+    // Reset timeout flag and close modal when user logs in (fresh session)
+    // This ensures clean state after re-login following a timeout
     if (currentUser && timeoutTriggeredRef.current) {
       timeoutTriggeredRef.current = false;
+      setIsModalOpen(false);
+      // Clear any existing timers to start fresh
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+        inactivityTimerRef.current = null;
+      }
     }
 
     // Reset inactivity timer function
@@ -102,10 +109,27 @@ const SessionTimeoutNotifier = () => {
     };
   }, [currentUser, location.pathname, signOut]); // location.pathname triggers on route change
 
-  // Handle modal OK button - redirect to login
-  const handleModalOk = () => {
-    timeoutTriggeredRef.current = false; // Reset timeout flag
+  // Handle modal OK button - ensure session is terminated and redirect to login
+  const handleModalOk = async () => {
+    // Ensure session is fully terminated
+    try {
+      await signOut();
+    } catch (error) {
+      // Even if signOut fails, continue to login page
+      console.error('Error signing out during timeout:', error);
+    }
+    
+    // Reset timeout flag and close modal
+    timeoutTriggeredRef.current = false;
     setIsModalOpen(false);
+    
+    // Clear any timers
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+      inactivityTimerRef.current = null;
+    }
+    
+    // Navigate to login page
     navigate('/login');
   };
 

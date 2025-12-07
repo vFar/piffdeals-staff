@@ -51,17 +51,13 @@ export const logActivity = async ({
       return { success: false, error: new Error('User not authenticated') };
     }
 
-    // Get IP address and user agent from browser if not provided
-    let finalIpAddress = ipAddress;
+    // Get user agent from browser if not provided
     let finalUserAgent = userAgent;
-    
-    // Try to get IP from request headers (if available in Edge Function context)
-    // In browser context, we can't get real IP, but we can get user agent
     if (!finalUserAgent && typeof navigator !== 'undefined') {
       finalUserAgent = navigator.userAgent;
     }
 
-    // Get user profile first (needed for both RPC and direct insert)
+    // Get user profile first (needed for fallback direct insert)
     const { data: userProfile, error: profileError } = await supabase
       .from('user_profiles')
       .select('username, email, role')
@@ -77,10 +73,65 @@ export const logActivity = async ({
     const userEmail = userProfile?.email || user.email || 'unknown@example.com';
     const userRole = userProfile?.role || 'employee';
 
-    // Call the database function to log activity
-    // The function uses SECURITY DEFINER so any authenticated user can call it
-    // The function accepts details as TEXT (JSON string) and converts to JSONB internally
-    console.log('[ActivityLog] Attempting to log:', {
+    // First, try to call the Edge Function which captures IP address from request headers
+    // This ensures all activity logs have IP addresses
+    const supabaseUrl = supabase.supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
+    const edgeFunctionUrl = `${supabaseUrl}/functions/v1/log-activity`;
+    
+    // Get the session token for authentication
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    if (token && supabaseUrl) {
+      try {
+        console.log('[ActivityLog] Attempting to log via Edge Function (with IP capture):', {
+          actionType,
+          actionCategory,
+          description,
+          userId: user.id,
+          username: userUsername
+        });
+
+        const response = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'apikey': supabase.supabaseKey || import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({
+            actionType,
+            actionCategory,
+            description,
+            details,
+            targetType,
+            targetId,
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            console.log('[ActivityLog] Successfully logged via Edge Function, log ID:', result.logId);
+            return { success: true, logId: result.logId };
+          } else {
+            console.warn('[ActivityLog] Edge Function returned error:', result.error);
+            // Fall through to RPC fallback
+          }
+        } else {
+          const errorText = await response.text();
+          console.warn('[ActivityLog] Edge Function request failed:', response.status, errorText);
+          // Fall through to RPC fallback
+        }
+      } catch (edgeFunctionError) {
+        console.warn('[ActivityLog] Edge Function call failed, falling back to RPC:', edgeFunctionError);
+        // Fall through to RPC fallback
+      }
+    }
+
+    // Fallback: Call the database function directly (for backward compatibility)
+    // Note: This won't have IP address in browser context, but Edge Function should work
+    console.log('[ActivityLog] Attempting to log via RPC (fallback):', {
       actionType,
       actionCategory,
       description,
@@ -96,7 +147,7 @@ export const logActivity = async ({
       p_details: details ? JSON.stringify(details) : null,
       p_target_type: targetType,
       p_target_id: targetId,
-      p_ip_address: finalIpAddress,
+      p_ip_address: ipAddress, // May be null in browser context
       p_user_agent: finalUserAgent,
     });
 

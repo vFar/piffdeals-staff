@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Layout, Menu, Input, Button, Dropdown, Modal, message, Spin, Typography, Empty } from 'antd';
+import { Layout, Menu, Input, Button, Dropdown, Modal, message, Spin, Typography, Empty, Drawer } from 'antd';
 import {
   DashboardOutlined,
   SettingOutlined,
@@ -13,6 +13,7 @@ import {
   TeamOutlined,
   FileProtectOutlined,
   HistoryOutlined,
+  MenuOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +33,11 @@ const DashboardLayout = ({ children }) => {
   const { currentUser, userProfile, signOut } = useAuth();
   const { isAdmin, isSuperAdmin, loading: roleLoading, userProfile: roleProfile } = useUserRole();
   
+  // Mobile sidebar state
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isTablet, setIsTablet] = useState(window.innerWidth >= 768 && window.innerWidth < 1024);
+  
   // Global search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState({ invoices: [], users: [], total: 0 });
@@ -40,6 +46,7 @@ const DashboardLayout = ({ children }) => {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const searchInputRef = useRef(null);
   const searchContainerRef = useRef(null);
+  const mobileSearchContainerRef = useRef(null);
   const searchTimeoutRef = useRef(null);
   const searchResultsListRef = useRef(null);
 
@@ -86,6 +93,21 @@ const DashboardLayout = ({ children }) => {
       }
     }
   }, [isSuperAdmin, roleLoading]);
+
+  // Handle window resize for responsive design
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+      setIsTablet(window.innerWidth >= 768 && window.innerWidth < 1024);
+      // Close mobile menu when resizing to desktop
+      if (window.innerWidth >= 1024 && mobileMenuOpen) {
+        setMobileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [mobileMenuOpen]);
 
   // Global search function - Role-based: employees see only invoices/customers, admins see everything
   const performSearch = useCallback(async (query) => {
@@ -197,23 +219,26 @@ const DashboardLayout = ({ children }) => {
     }
   }, [isAdmin, roleLoading, cachedIsAdmin, roleProfile, currentUser]);
 
-  // Debounced search
+  // Debounced search - reduced delay for better responsiveness
   useEffect(() => {
     // Clear previous timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
-    // Set new timeout for debounced search
+    // Set new timeout for debounced search - reduced from 300ms to 150ms
     if (searchQuery.trim().length >= 2) {
+      // Show loading state immediately for better UX
+      setIsSearching(true);
       searchTimeoutRef.current = setTimeout(() => {
         performSearch(searchQuery);
-      }, 300);
+      }, 150);
       setSelectedIndex(-1);
     } else {
       setSearchResults({ invoices: [], users: [], total: 0 });
       setShowSearchResults(false);
       setSelectedIndex(-1);
+      setIsSearching(false);
     }
 
     // Cleanup
@@ -226,31 +251,36 @@ const DashboardLayout = ({ children }) => {
 
   // Close search results when clicking outside or pressing Escape
   useEffect(() => {
+    if (!showSearchResults) return;
+
     const handleClickOutside = (event) => {
+      const activeContainer = (isMobile || isTablet) 
+        ? mobileSearchContainerRef.current 
+        : searchContainerRef.current;
+      
       if (
-        searchContainerRef.current &&
-        !searchContainerRef.current.contains(event.target)
+        activeContainer &&
+        !activeContainer.contains(event.target)
       ) {
         setShowSearchResults(false);
       }
     };
 
     const handleEscapeKey = (event) => {
-      if (event.key === 'Escape' && showSearchResults) {
+      if (event.key === 'Escape') {
         setShowSearchResults(false);
         setSearchQuery('');
       }
     };
 
-    if (showSearchResults) {
-      document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('keydown', handleEscapeKey);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-        document.removeEventListener('keydown', handleEscapeKey);
-      };
-    }
-  }, [showSearchResults]);
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscapeKey);
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscapeKey);
+    };
+  }, [showSearchResults, isMobile, isTablet]);
 
   // Handle search result click
   const handleSearchResultClick = (result) => {
@@ -400,6 +430,10 @@ const DashboardLayout = ({ children }) => {
 
   const handleMenuClick = ({ key }) => {
     navigate(key);
+    // Close mobile menu after navigation
+    if (isMobile || isTablet) {
+      setMobileMenuOpen(false);
+    }
   };
 
   const handleUserMenuClick = async ({ key }) => {
@@ -469,107 +503,492 @@ const DashboardLayout = ({ children }) => {
     ];
   };
 
-  return (
-    <Layout style={{ minHeight: '100vh', background: '#EBF3FF', overflow: 'visible' }}>
-      {/* Sidebar */}
-      <Sider 
-        width={256}
+  // Sidebar content component (reusable for desktop and mobile)
+  const SidebarContent = ({ showMobileSearch = false }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Logo Section */}
+      <div
         style={{
-          overflow: 'auto',
-          height: '100vh',
-          position: 'fixed',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          background: '#ffffff',
-          borderRight: '1px solid #e5e7eb',
-          zIndex: 50,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '24px',
+          borderBottom: '1px solid #e5e7eb',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          {/* Logo Section */}
-          <div
+        <div
+          style={{
+            width: '40px',
+            height: '40px',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <img 
+            src="/images/S-3.png" 
+            alt="Piffdeals" 
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+          />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <img 
+            src="/images/piffdeals_text_primary.svg" 
+            alt="Piffdeals" 
+            style={{ height: '24px', width: 'auto' }}
+          />
+        </div>
+      </div>
+
+      {/* Mobile Search Bar - Only shown in mobile drawer */}
+      {showMobileSearch && (
+        <div 
+          ref={mobileSearchContainerRef}
+          style={{ 
+            padding: '16px',
+            borderBottom: '1px solid #e5e7eb',
+            position: 'relative',
+          }}
+        >
+          <Input
+            ref={searchInputRef}
+            prefix={<SearchOutlined style={{ color: '#6b7280' }} />}
+            placeholder={
+              roleLoading 
+                ? 'Meklēt...' 
+                : isAdmin 
+                  ? 'Meklēt rēķinus, klientus, lietotājus...' 
+                  : 'Meklēt rēķinus un klientus...'
+            }
+            value={searchQuery}
+            onChange={handleSearchChange}
+            onFocus={handleSearchFocus}
+            onKeyDown={handleSearchKeyDown}
+            allowClear
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '24px',
-              borderBottom: '1px solid #e5e7eb',
+              background: showSearchResults ? '#ffffff' : '#f3f4f6',
+              border: showSearchResults ? '1px solid #0068FF' : 'none',
+              borderRadius: '8px',
+              height: '40px',
+              fontSize: '14px',
+              transition: 'all 0.2s',
             }}
-          >
+          />
+          
+          {/* Search Results Dropdown for Mobile */}
+          {showSearchResults && (
             <div
               style={{
-                width: '40px',
-                height: '40px',
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                position: 'absolute',
+                top: '100%',
+                left: '16px',
+                right: '16px',
+                marginTop: '4px',
+                background: '#ffffff',
+                borderRadius: '12px',
+                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+                border: '1px solid #e5e7eb',
+                maxHeight: '400px',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                zIndex: 10002,
+                animation: 'searchDropdownFadeIn 0.2s ease-out',
               }}
+              className="global-search-results"
             >
-              <img 
-                src="/images/S-3.png" 
-                alt="Piffdeals" 
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <img 
-                src="/images/piffdeals_text_primary.svg" 
-                alt="Piffdeals" 
-                style={{ height: '24px', width: 'auto' }}
-              />
-            </div>
-          </div>
+              {isSearching ? (
+                <div style={{ 
+                  padding: '40px 24px', 
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}>
+                  <Spin size="large" />
+                  <Text style={{ color: '#6b7280', fontSize: '14px', fontWeight: 500 }}>
+                    Meklē rezultātus...
+                  </Text>
+                </div>
+              ) : searchResults.total > 0 ? (
+                <div ref={searchResultsListRef}>
+                  {/* Invoices Section */}
+                  {searchResults.invoices.length > 0 && (
+                    <div style={{ padding: '12px 12px 8px 12px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '8px',
+                      }}>
+                        <FileTextOutlined style={{ color: '#0068FF', fontSize: '14px' }} />
+                        <Text style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          color: '#6b7280',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                        }}>
+                          {isAdmin ? 'Rēķini' : 'Rēķini un klienti'} ({searchResults.invoices.length})
+                        </Text>
+                      </div>
+                      {searchResults.invoices.map((result, index) => {
+                        const globalIndex = index;
+                        const isSelected = selectedIndex === globalIndex;
+                        return (
+                          <div
+                            key={`invoice-${result.id}-${index}`}
+                            onClick={() => {
+                              handleSearchResultClick(result);
+                              setMobileMenuOpen(false);
+                            }}
+                            style={{
+                              padding: '12px',
+                              cursor: 'pointer',
+                              borderRadius: '8px',
+                              transition: 'all 0.15s',
+                              marginBottom: index < searchResults.invoices.length - 1 ? '4px' : 0,
+                              background: isSelected ? '#f0f7ff' : 'transparent',
+                              border: isSelected ? '1px solid #0068FF' : '1px solid transparent',
+                            }}
+                            className="search-result-item"
+                            onMouseEnter={(e) => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = '#f9fafb';
+                                e.currentTarget.style.borderColor = '#e5e7eb';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = 'transparent';
+                                e.currentTarget.style.borderColor = 'transparent';
+                              }
+                            }}
+                            onMouseMove={() => setSelectedIndex(globalIndex)}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                              <div style={{
+                                width: '40px',
+                                height: '40px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'linear-gradient(135deg, rgba(0, 104, 255, 0.1) 0%, rgba(0, 104, 255, 0.05) 100%)',
+                                borderRadius: '10px',
+                                flexShrink: 0,
+                              }}>
+                                {React.cloneElement(result.icon, { style: { color: '#0068FF', fontSize: '18px' } })}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  marginBottom: '6px',
+                                }}>
+                                  <Text style={{
+                                    fontSize: '14px',
+                                    fontWeight: 600,
+                                    color: '#111827',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}>
+                                    #{result.title?.toString().replace(/^#+/, '') || ''}
+                                  </Text>
+                                </div>
+                                <Text style={{
+                                  fontSize: '13px',
+                                  color: '#6b7280',
+                                  marginBottom: '8px',
+                                  display: 'block',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}>
+                                  {result.subtitle}
+                                </Text>
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  flexWrap: 'wrap',
+                                }}>
+                                  <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    color: result.statusColor,
+                                    background: result.statusBg,
+                                    padding: '4px 10px',
+                                    borderRadius: '6px',
+                                  }}>
+                                    {result.metadata}
+                                  </span>
+                                  <span style={{
+                                    fontSize: '13px',
+                                    fontWeight: 700,
+                                    color: '#111827',
+                                  }}>
+                                    €{result.amount.toFixed(2)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
-          {/* Navigation Menu */}
-          <div style={{ flex: 1, padding: '16px', overflow: 'auto' }}>
-            <Menu
-              mode="inline"
-              selectedKeys={[getSelectedKey()]}
-              items={menuItems}
-              onClick={handleMenuClick}
-              style={{
-                border: 'none',
-                background: 'transparent',
-              }}
-              className="custom-menu"
-            />
-          </div>
-
-          {/* Create Invoice Button */}
-          <div style={{ padding: '16px', marginTop: 'auto' }}>
-            <Button
-              type="primary"
-              block
-              size="large"
-              style={{
-                height: '40px',
-                background: '#0068FF',
-                borderColor: '#0068FF',
-                fontWeight: 700,
-                fontSize: '14px',
-                borderRadius: '8px',
-              }}
-              onClick={() => navigate('/invoices/create')}
-            >
-              Izveidot jaunu rēķinu
-            </Button>
-          </div>
+                  {/* Users Section - Only visible to admins */}
+                  {isAdmin && searchResults.users.length > 0 && (
+                    <div style={{
+                      padding: searchResults.invoices.length > 0 ? '12px 12px 8px 12px' : '12px 12px 8px 12px',
+                      borderTop: searchResults.invoices.length > 0 ? '1px solid #f3f4f6' : 'none',
+                      marginTop: searchResults.invoices.length > 0 ? '4px' : 0,
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '8px',
+                      }}>
+                        <TeamOutlined style={{ color: '#22c55e', fontSize: '14px' }} />
+                        <Text style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          color: '#6b7280',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                        }}>
+                          Lietotāji ({searchResults.users.length})
+                        </Text>
+                      </div>
+                      {searchResults.users.map((result, index) => {
+                        const globalIndex = searchResults.invoices.length + index;
+                        const isSelected = selectedIndex === globalIndex;
+                        return (
+                          <div
+                            key={`user-${result.id}-${index}`}
+                            onClick={() => {
+                              handleSearchResultClick(result);
+                              setMobileMenuOpen(false);
+                            }}
+                            style={{
+                              padding: '12px',
+                              cursor: 'pointer',
+                              borderRadius: '8px',
+                              transition: 'all 0.15s',
+                              marginBottom: index < searchResults.users.length - 1 ? '4px' : 0,
+                              background: isSelected ? '#f0fdf4' : 'transparent',
+                              border: isSelected ? '1px solid #22c55e' : '1px solid transparent',
+                            }}
+                            className="search-result-item"
+                            onMouseEnter={(e) => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = '#f9fafb';
+                                e.currentTarget.style.borderColor = '#e5e7eb';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isSelected) {
+                                e.currentTarget.style.background = 'transparent';
+                                e.currentTarget.style.borderColor = 'transparent';
+                              }
+                            }}
+                            onMouseMove={() => setSelectedIndex(globalIndex)}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                              <div style={{
+                                width: '40px',
+                                height: '40px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(34, 197, 94, 0.05) 100%)',
+                                borderRadius: '10px',
+                                flexShrink: 0,
+                              }}>
+                                {React.cloneElement(result.icon, { style: { color: '#22c55e', fontSize: '18px' } })}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <Text style={{
+                                  fontSize: '14px',
+                                  fontWeight: 600,
+                                  color: '#111827',
+                                  marginBottom: '6px',
+                                  display: 'block',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}>
+                                  {result.title}
+                                </Text>
+                                <Text style={{
+                                  fontSize: '13px',
+                                  color: '#6b7280',
+                                  marginBottom: '8px',
+                                  display: 'block',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}>
+                                  {result.subtitle}
+                                </Text>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  color: result.statusColor,
+                                  background: result.statusBg,
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                }}>
+                                  {result.metadata}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : searchQuery.trim().length >= 2 ? (
+                <div style={{
+                  padding: '48px 24px',
+                  textAlign: 'center',
+                }}>
+                  <div style={{
+                    width: '64px',
+                    height: '64px',
+                    margin: '0 auto 16px',
+                    borderRadius: '50%',
+                    background: '#f3f4f6',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <SearchOutlined style={{ fontSize: '28px', color: '#9ca3af' }} />
+                  </div>
+                  <Text style={{
+                    color: '#6b7280',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    display: 'block',
+                    marginBottom: '4px',
+                  }}>
+                    Nav atrastu rezultātu
+                  </Text>
+                  <Text style={{
+                    color: '#9ca3af',
+                    fontSize: '12px',
+                  }}>
+                    Mēģiniet ar citu meklēšanas terminu
+                  </Text>
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
-      </Sider>
+      )}
 
+      {/* Navigation Menu */}
+      <div style={{ flex: 1, padding: '16px', overflow: 'auto' }}>
+        <Menu
+          mode="inline"
+          selectedKeys={[getSelectedKey()]}
+          items={menuItems}
+          onClick={handleMenuClick}
+          style={{
+            border: 'none',
+            background: 'transparent',
+          }}
+          className="custom-menu"
+        />
+      </div>
+
+      {/* Create Invoice Button */}
+      <div style={{ padding: '16px', marginTop: 'auto' }}>
+        <Button
+          type="primary"
+          block
+          size="large"
+          style={{
+            height: '40px',
+            background: '#0068FF',
+            borderColor: '#0068FF',
+            fontWeight: 700,
+            fontSize: '14px',
+            borderRadius: '8px',
+          }}
+          onClick={() => {
+            navigate('/invoices/create');
+            if (isMobile || isTablet) {
+              setMobileMenuOpen(false);
+            }
+          }}
+        >
+          Izveidot jaunu rēķinu
+        </Button>
+      </div>
+    </div>
+  );
+
+  return (
+    <Layout style={{ minHeight: '100vh', background: '#EBF3FF', overflow: 'visible' }}>
+      {/* Desktop Sidebar - Hidden on mobile/tablet */}
+      {!isMobile && !isTablet && (
+        <Sider 
+          width={256}
+          style={{
+            overflow: 'auto',
+            height: '100vh',
+            position: 'fixed',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            background: '#ffffff',
+            borderRight: '1px solid #e5e7eb',
+            zIndex: 50,
+          }}
+        >
+          <SidebarContent />
+        </Sider>
+      )}
+
+      {/* Mobile/Tablet Drawer */}
+      <Drawer
+        title={null}
+        placement="left"
+        onClose={() => {
+          setMobileMenuOpen(false);
+          setShowSearchResults(false);
+        }}
+        open={mobileMenuOpen}
+        styles={{ body: { padding: 0 } }}
+        width={280}
+        style={{ zIndex: 1001 }}
+        closable={false}
+      >
+        <SidebarContent showMobileSearch={true} />
+      </Drawer>
       {/* Main Layout */}
-      <Layout style={{ marginLeft: 256, background: '#EBF3FF' }}>
+      <Layout style={{ 
+        marginLeft: (isMobile || isTablet) ? 0 : 256, 
+        background: '#EBF3FF',
+        transition: 'margin-left 0.2s',
+      }}>
         {/* Header */}
         <Header
           style={{
-            padding: '0 32px',
+            padding: isMobile ? '0 16px' : isTablet ? '0 24px' : '0 32px',
             background: 'rgba(255, 255, 255, 0.8)',
             backdropFilter: 'blur(8px)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            gap: isMobile ? '12px' : '16px',
             position: 'sticky',
             top: 0,
             zIndex: 1000,
@@ -577,17 +996,36 @@ const DashboardLayout = ({ children }) => {
             height: '64px',
           }}
         >
-          {/* Search Bar with Results Dropdown */}
-          <div 
-            ref={searchContainerRef}
-            style={{ 
-              width: '100%', 
-              minWidth: '300px', 
-              maxWidth: '600px',
-              position: 'relative',
-              flex: 1,
-            }}
-          >
+          {/* Hamburger Menu Button - Mobile/Tablet only */}
+          {(isMobile || isTablet) && (
+            <Button
+              type="text"
+              icon={<MenuOutlined style={{ fontSize: '20px' }} />}
+              onClick={() => setMobileMenuOpen(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '40px',
+                height: '40px',
+                padding: 0,
+                flexShrink: 0,
+              }}
+            />
+          )}
+
+          {/* Search Bar with Results Dropdown - Hidden on mobile/tablet */}
+          {!isMobile && !isTablet && (
+            <div 
+              ref={searchContainerRef}
+              style={{ 
+                width: '100%', 
+                minWidth: '300px', 
+                maxWidth: '600px',
+                position: 'relative',
+                flex: 1,
+              }}
+            >
             <Input
               ref={searchInputRef}
               prefix={<SearchOutlined style={{ color: '#6b7280' }} />}
@@ -921,10 +1359,16 @@ const DashboardLayout = ({ children }) => {
                 ) : null}
               </div>
             )}
-          </div>
+            </div>
+          )}
 
           {/* Right Section */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: isMobile ? '8px' : '16px',
+            flexShrink: 0,
+          }}>
             {/* Notification Bell */}
             <NotificationDropdown />
 
@@ -943,7 +1387,7 @@ const DashboardLayout = ({ children }) => {
                 alignItems: 'center', 
                 gap: '8px', 
                 cursor: 'pointer',
-                padding: '8px 12px',
+                padding: isMobile ? '6px 8px' : '8px 12px',
                 borderRadius: '8px',
                 transition: 'all 0.2s',
                 background: 'transparent',
@@ -952,19 +1396,34 @@ const DashboardLayout = ({ children }) => {
               }}
               className="user-dropdown-trigger"
               >
-                <div style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  alignItems: 'flex-end',
-                  gap: '2px'
-                }}>
-                  <div style={{ fontSize: '14px', fontWeight: 500, color: '#111827', lineHeight: '1.2' }}>
+                {!isMobile && (
+                  <div style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'flex-end',
+                    gap: '2px'
+                  }}>
+                    <div style={{ fontSize: '14px', fontWeight: 500, color: '#111827', lineHeight: '1.2' }}>
+                      {userProfile?.username || currentUser?.email?.split('@')[0] || 'User'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.2' }}>
+                      {userProfile?.email || currentUser?.email || ''}
+                    </div>
+                  </div>
+                )}
+                {isMobile && (
+                  <div style={{ 
+                    fontSize: '14px', 
+                    fontWeight: 500, 
+                    color: '#111827',
+                    maxWidth: '100px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
                     {userProfile?.username || currentUser?.email?.split('@')[0] || 'User'}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.2' }}>
-                    {userProfile?.email || currentUser?.email || ''}
-                  </div>
-                </div>
+                )}
                 <DownOutlined style={{ fontSize: '12px', color: '#6b7280' }} />
               </div>
             </Dropdown>
@@ -974,7 +1433,7 @@ const DashboardLayout = ({ children }) => {
         {/* Content */}
         <Content
           style={{
-            padding: '32px',
+            padding: isMobile ? '16px' : isTablet ? '24px' : '32px',
             minHeight: 'calc(100vh - 64px)',
             position: 'relative',
             zIndex: 1,

@@ -84,3 +84,7 @@ When a non-super-admin user performs an action (like creating an invoice):
 4. Check the activity_logs table to see if the entry was created
 5. If still not working, check database logs for errors
 
+
+
+
+

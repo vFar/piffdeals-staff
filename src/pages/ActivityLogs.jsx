@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Card, Table, Typography, Tag, Space, Select, DatePicker, Input, Spin, Empty, Tooltip, Alert } from 'antd';
 import { SearchOutlined, FilterOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
+import Pagination from '../components/Pagination';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
 import dayjs from 'dayjs';
@@ -20,6 +21,8 @@ const ActivityLogs = () => {
   const [selectedRole, setSelectedRole] = useState('all');
   const [dateRange, setDateRange] = useState(null);
   const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const { isSuperAdmin } = useUserRole();
 
   useEffect(() => {
@@ -110,6 +113,7 @@ const ActivityLogs = () => {
     }
 
     setFilteredLogs(filtered);
+    setCurrentPage(1);
   };
 
   const getActionTypeLabel = (actionType) => {
@@ -403,7 +407,7 @@ const ActivityLogs = () => {
     {
       title: 'Lietotājs',
       key: 'user',
-      width: 180,
+      width: 220,
       render: (_, record) => {
         const role = record.user_role ? getRoleLabel(record.user_role) : null;
         return (
@@ -411,6 +415,11 @@ const ActivityLogs = () => {
             <div style={{ fontWeight: 500, marginBottom: '4px', color: '#111827' }}>
               {record.user_username || 'Nezināms'}
             </div>
+            {record.user_email && (
+              <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
+                {record.user_email}
+              </div>
+            )}
             {role && (
               <Tag color={getRoleColor(record.user_role)} size="small">
                 {role}
@@ -664,20 +673,35 @@ const ActivityLogs = () => {
         {/* Table */}
         <Table
           columns={columns}
-          dataSource={filteredLogs}
+          dataSource={filteredLogs.slice((currentPage - 1) * pageSize, currentPage * pageSize)}
           rowKey="id"
           loading={loading}
-          pagination={{
-            pageSize: 50,
-            showSizeChanger: true,
-            showTotal: (total) => `Kopā ${total} ieraksti`,
-            pageSizeOptions: ['25', '50', '100', '200'],
-          }}
+          pagination={false}
           scroll={{ x: 'max-content' }}
           locale={{
             emptyText: <Empty description="Nav atrastu ierakstu" />,
           }}
         />
+        {filteredLogs.length > 0 && (
+          <Pagination
+            current={currentPage}
+            total={filteredLogs.length}
+            pageSize={pageSize}
+            pageSizeOptions={['25', '50', '100', '200']}
+            showTotalCustom={(total) => `Kopā ${total} ieraksti`}
+            onChange={(page, size) => {
+              setCurrentPage(page);
+              if (size !== pageSize) {
+                setPageSize(size);
+                setCurrentPage(1);
+              }
+            }}
+            onShowSizeChange={(current, size) => {
+              setPageSize(size);
+              setCurrentPage(1);
+            }}
+          />
+        )}
       </Card>
     </DashboardLayout>
   );

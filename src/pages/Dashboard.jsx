@@ -46,6 +46,11 @@ const Dashboard = () => {
   const pieChartRef = useRef(null);
   const [lineChartInstance, setLineChartInstance] = useState(null);
   const [pieChartInstance, setPieChartInstance] = useState(null);
+  const hasFetchedRef = useRef(false);
+  const isFetchingRef = useRef(false);
+  const prevSalesDataRef = useRef([]);
+  const prevSelectedMonthRef = useRef('');
+  const prevInvoiceStatusDataRef = useRef({});
   
   const [dashboardData, setDashboardData] = useState({
     monthlyIncome: 0,
@@ -63,6 +68,10 @@ const Dashboard = () => {
   });
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState('current'); // 'current', 'last', 'last2'
+
+  // Memoize admin status to prevent unnecessary re-renders
+  const isAdminUser = useMemo(() => isAdmin || isSuperAdmin, [isAdmin, isSuperAdmin]);
+  const userId = useMemo(() => userProfile?.id, [userProfile?.id]);
 
   // Get username with fallback
   const userName = useMemo(() => {
@@ -85,15 +94,28 @@ const Dashboard = () => {
     };
   };
 
+  // Reset fetch flag when user changes
+  useEffect(() => {
+    if (userId && hasFetchedRef.current !== userId) {
+      hasFetchedRef.current = false;
+    }
+  }, [userId]);
+
   // Fetch dashboard data
   useEffect(() => {
-    if (roleLoading || !userProfile) return;
+    // Prevent multiple simultaneous fetches
+    if (roleLoading || !userProfile || !userId || isFetchingRef.current) return;
+
+    // Only fetch once per user session unless explicitly needed
+    if (hasFetchedRef.current === userId) return;
 
     const fetchDashboardData = async () => {
+      // Set flag to prevent concurrent fetches
+      if (isFetchingRef.current) return;
+      isFetchingRef.current = true;
+
       try {
         setLoading(true);
-        const userId = userProfile.id;
-        const isAdminUser = isAdmin || isSuperAdmin;
 
         // Get month ranges
         const monthRanges = getMonthRanges();
@@ -291,14 +313,19 @@ const Dashboard = () => {
           latestInvoices,
           invoiceStatusData: invoiceStatusCounts,
         });
+        
+        // Mark as fetched for this user
+        hasFetchedRef.current = userId;
       } catch (error) {
+        console.error('Error fetching dashboard data:', error);
       } finally {
         setLoading(false);
+        isFetchingRef.current = false;
       }
     };
 
     fetchDashboardData();
-  }, [userProfile, isAdmin, isSuperAdmin, roleLoading]);
+  }, [userId, isAdminUser, roleLoading]);
 
   // Format percentage with color
   const formatPercentage = (value) => {
@@ -312,9 +339,23 @@ const Dashboard = () => {
   useEffect(() => {
     if (!lineChartRef.current || !dashboardData.salesData.length) return;
 
+    // Check if data or month selection actually changed
+    const dataChanged = JSON.stringify(dashboardData.salesData) !== JSON.stringify(prevSalesDataRef.current);
+    const monthChanged = selectedMonth !== prevSelectedMonthRef.current;
+    
+    if (!dataChanged && !monthChanged && lineChartInstance) {
+      // Data hasn't changed, no need to recreate chart
+      return;
+    }
+
+    // Update refs
+    prevSalesDataRef.current = dashboardData.salesData;
+    prevSelectedMonthRef.current = selectedMonth;
+
     // Destroy existing chart if it exists
     if (lineChartInstance) {
       lineChartInstance.destroy();
+      setLineChartInstance(null);
     }
 
     const ctx = lineChartRef.current.getContext('2d');
@@ -404,16 +445,29 @@ const Dashboard = () => {
         chartInstance.destroy();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardData.salesData, selectedMonth]);
 
   // Initialize pie chart for employees
   useEffect(() => {
-    if (!pieChartRef.current || isAdmin || isSuperAdmin) return;
+    if (!pieChartRef.current || isAdminUser) return;
     if (Object.values(dashboardData.invoiceStatusData).every(v => v === 0)) return;
+
+    // Check if data actually changed
+    const dataChanged = JSON.stringify(dashboardData.invoiceStatusData) !== JSON.stringify(prevInvoiceStatusDataRef.current);
+    
+    if (!dataChanged && pieChartInstance) {
+      // Data hasn't changed, no need to recreate chart
+      return;
+    }
+
+    // Update ref
+    prevInvoiceStatusDataRef.current = dashboardData.invoiceStatusData;
 
     // Destroy existing chart if it exists
     if (pieChartInstance) {
       pieChartInstance.destroy();
+      setPieChartInstance(null);
     }
 
     const ctx = pieChartRef.current.getContext('2d');
@@ -499,7 +553,8 @@ const Dashboard = () => {
         chartInstance.destroy();
       }
     };
-  }, [dashboardData.invoiceStatusData, isAdmin, isSuperAdmin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardData.invoiceStatusData, isAdminUser]);
 
   // Format date with leading zeros
   const formatDate = (dateString) => {
@@ -590,8 +645,8 @@ const Dashboard = () => {
   const createdPercent = formatPercentage(dashboardData.createdInvoicesChange);
   const unpaidPercent = formatPercentage(dashboardData.unpaidInvoicesChange);
 
-  const showUserRegistrations = isAdmin || isSuperAdmin;
-  const isEmployee = !isAdmin && !isSuperAdmin;
+  const showUserRegistrations = isAdminUser;
+  const isEmployee = !isAdminUser;
 
   return (
     <DashboardLayout>

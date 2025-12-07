@@ -210,3 +210,7 @@ If you want explicit control, you can add to `vercel.json`:
 
 **Remember**: Vercel handles SSL certificates automatically. Once DNS is configured correctly, just wait 5-60 minutes for the certificate to be provisioned!
 
+
+
+
+

@@ -3,6 +3,7 @@ import { Button, Table, message, Modal, Input, Dropdown, Card, Typography, Spin,
 import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
+import Pagination from '../components/Pagination';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -19,6 +20,8 @@ const Invoices = () => {
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true); // Track initial load separately
   const [searchText, setSearchText] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [paymentLinkModal, setPaymentLinkModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [shareMethodModal, setShareMethodModal] = useState(false);
@@ -62,6 +65,7 @@ const Invoices = () => {
   useEffect(() => {
     if (!searchText.trim()) {
       setFilteredInvoices(invoices);
+      setCurrentPage(1);
       return;
     }
 
@@ -77,6 +81,7 @@ const Invoices = () => {
     });
 
     setFilteredInvoices(filtered);
+    setCurrentPage(1);
   }, [searchText, invoices]);
 
   // Preserve selectedInvoice when invoices list updates (e.g., after fetchInvoices)
@@ -1215,29 +1220,41 @@ const Invoices = () => {
               <Spin size="large" />
             </div>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <Table
-                columns={columns}
-                dataSource={filteredInvoices.map((invoice) => ({ ...invoice, key: invoice.id }))}
-                pagination={{
-                  pageSize: 10,
-                  showSizeChanger: true,
-                  showTotal: (total, range) => `Rāda ${range[0]} līdz ${range[1]} no ${total} rezultātiem`,
-                  style: {
-                    padding: '16px',
-                    borderTop: '1px solid #e5e7eb',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  },
-                }}
-                className="custom-table"
-                rowClassName={(record) => {
-                  const isCreator = record.user_id === userProfile?.id;
-                  return record.status === 'draft' && isCreator ? 'custom-table-row draft-row' : 'custom-table-row';
-                }}
-              />
-            </div>
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <Table
+                  columns={columns}
+                  dataSource={filteredInvoices
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((invoice) => ({ ...invoice, key: invoice.id }))}
+                  pagination={false}
+                  className="custom-table"
+                  rowClassName={(record) => {
+                    const isCreator = record.user_id === userProfile?.id;
+                    return record.status === 'draft' && isCreator ? 'custom-table-row draft-row' : 'custom-table-row';
+                  }}
+                />
+              </div>
+              {filteredInvoices.length > 0 && (
+                <Pagination
+                  current={currentPage}
+                  total={filteredInvoices.length}
+                  pageSize={pageSize}
+                  pageSizeOptions={['10', '25', '50', '100']}
+                  onChange={(page, size) => {
+                    setCurrentPage(page);
+                    if (size !== pageSize) {
+                      setPageSize(size);
+                      setCurrentPage(1);
+                    }
+                  }}
+                  onShowSizeChange={(current, size) => {
+                    setPageSize(size);
+                    setCurrentPage(1);
+                  }}
+                />
+              )}
+            </>
           )}
         </Card>
       </div>

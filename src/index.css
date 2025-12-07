@@ -384,3 +384,111 @@ code {
 .ant-spin .ant-spin-dot-item {
   background-color: #0068FF;
 }
+
+/* ============================================
+   Responsive Design Styles
+   ============================================ */
+
+/* Mobile: < 768px */
+@media (max-width: 767px) {
+  /* Ensure tables are scrollable on mobile */
+  .ant-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ant-table {
+    min-width: 600px;
+  }
+
+  /* Make cards stack properly */
+  .ant-card {
+    margin-bottom: 16px;
+  }
+
+  /* Adjust search results dropdown for mobile */
+  .global-search-results {
+    max-height: 400px !important;
+  }
+
+  /* Make drawer menu items more touch-friendly */
+  .ant-drawer-body .custom-menu .ant-menu-item {
+    height: 48px;
+    line-height: 48px;
+    font-size: 16px;
+  }
+
+  /* Adjust breadcrumbs for mobile */
+  .ant-breadcrumb {
+    font-size: 12px;
+  }
+
+  /* Make modals full-width on mobile */
+  .ant-modal {
+    max-width: calc(100vw - 32px) !important;
+    margin: 16px auto !important;
+  }
+
+  /* Responsive grid columns */
+  .ant-row {
+    margin-left: -8px !important;
+    margin-right: -8px !important;
+  }
+
+  .ant-col {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}
+
+/* Tablet: 768px - 1023px */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .ant-table-wrapper {
+    overflow-x: auto;
+  }
+
+  .global-search-results {
+    max-height: 450px !important;
+  }
+}
+
+/* Desktop: >= 1024px */
+@media (min-width: 1024px) {
+  /* Ensure proper spacing on desktop */
+  .ant-layout-content {
+    max-width: 100%;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  /* Increase touch target sizes */
+  .ant-btn {
+    min-height: 44px;
+  }
+
+  .ant-menu-item {
+    min-height: 44px;
+  }
+
+  /* Better spacing for touch */
+  .ant-card {
+    padding: 16px;
+  }
+}
+
+/* Print styles */
+@media print {
+  .ant-layout-sider,
+  .ant-layout-header,
+  .ant-btn,
+  .ant-dropdown,
+  .global-search-results {
+    display: none !important;
+  }
+
+  .ant-layout-content {
+    margin-left: 0 !important;
+    padding: 0 !important;
+  }
+}

@@ -84,3 +84,7 @@ CREATE POLICY "Users can update invoices"
 -- 3. Index exists: SELECT indexname FROM pg_indexes WHERE tablename = 'invoices' AND indexname = 'idx_invoices_last_email_sent';
 
 
+
+
+
+

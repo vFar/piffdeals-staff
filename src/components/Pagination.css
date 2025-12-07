@@ -1,0 +1,239 @@
+.modern-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  border-radius: 0 0 8px 8px;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 0;
+}
+
+.pagination-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pagination-total {
+  font-size: 14px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.pagination-total strong {
+  color: #111827;
+  font-weight: 600;
+}
+
+.pagination-size-changer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.size-changer-label {
+  font-size: 14px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.pagination-select {
+  min-width: 80px;
+}
+
+.pagination-select .ant-select-selector {
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  transition: all 0.2s;
+}
+
+.pagination-select:hover .ant-select-selector {
+  border-color: #0068FF;
+}
+
+.pagination-select.ant-select-focused .ant-select-selector {
+  border-color: #0068FF;
+  box-shadow: 0 0 0 2px rgba(0, 104, 255, 0.1);
+}
+
+.pagination-right {
+  display: flex;
+  align-items: center;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagination-numbers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 4px;
+}
+
+.pagination-btn {
+  min-width: 36px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #4b5563;
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background-color: #f3f4f6;
+  border-color: #e5e7eb;
+  color: #111827;
+}
+
+.pagination-btn:focus-visible {
+  outline: 2px solid #0068FF;
+  outline-offset: 2px;
+}
+
+.pagination-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination-btn-icon {
+  min-width: 36px;
+  padding: 0;
+}
+
+.pagination-number {
+  min-width: 36px;
+}
+
+.pagination-number.active {
+  background-color: #0068FF;
+  border-color: #0068FF;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.pagination-number.active:hover {
+  background-color: #0052cc;
+  border-color: #0052cc;
+  color: #ffffff;
+}
+
+.pagination-ellipsis {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  color: #9ca3af;
+  font-size: 14px;
+  user-select: none;
+}
+
+/* Mobile Styles */
+.modern-pagination.mobile {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 12px 16px;
+  gap: 12px;
+}
+
+.modern-pagination.mobile .pagination-left {
+  justify-content: space-between;
+  width: 100%;
+  order: 2;
+}
+
+.modern-pagination.mobile .pagination-right {
+  width: 100%;
+  order: 1;
+  justify-content: center;
+}
+
+.modern-pagination.mobile .pagination-controls {
+  width: 100%;
+  justify-content: center;
+}
+
+.modern-pagination.mobile .pagination-numbers {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+}
+
+.modern-pagination.mobile .pagination-btn {
+  min-width: 40px;
+  height: 40px;
+  font-size: 14px;
+}
+
+.modern-pagination.mobile .pagination-number {
+  min-width: 40px;
+}
+
+.modern-pagination.mobile .pagination-ellipsis {
+  min-width: 40px;
+  height: 40px;
+}
+
+.modern-pagination.mobile .pagination-total {
+  font-size: 13px;
+}
+
+.modern-pagination.mobile .size-changer-label {
+  font-size: 13px;
+}
+
+/* Tablet Styles */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .modern-pagination {
+    padding: 14px 18px;
+  }
+
+  .pagination-btn {
+    min-width: 38px;
+    height: 38px;
+  }
+
+  .pagination-number {
+    min-width: 38px;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  .pagination-btn {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .pagination-number {
+    min-width: 44px;
+  }
+
+  .pagination-ellipsis {
+    min-width: 44px;
+    height: 44px;
+  }
+}
+
+/* Dark mode support (if needed in future) */
+@media (prefers-color-scheme: dark) {
+  /* Can be added later if dark mode is implemented */
+}
+
+
+
+

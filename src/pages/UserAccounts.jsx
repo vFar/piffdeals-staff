@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, Table, Typography, Breadcrumb, Tag, Space, message, Spin, Modal, Form, Input, Select, Button, Popconfirm, Dropdown, App, Tooltip } from 'antd';
 import { PlusOutlined, MoreOutlined, SearchOutlined, UserSwitchOutlined, DeleteOutlined, EditOutlined, MailOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
+import Pagination from '../components/Pagination';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
 import { sendPasswordResetEmail } from '../services/userService';
@@ -25,6 +26,8 @@ const UserAccounts = () => {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [isBulkRoleModalOpen, setIsBulkRoleModalOpen] = useState(false);
   const [bulkRoleForm] = Form.useForm();
@@ -115,6 +118,7 @@ const UserAccounts = () => {
   useEffect(() => {
     if (!searchText.trim()) {
       setFilteredUsers(users);
+      setCurrentPage(1);
       return;
     }
 
@@ -130,6 +134,7 @@ const UserAccounts = () => {
     });
 
     setFilteredUsers(filtered);
+    setCurrentPage(1);
   }, [searchText, users]);
 
   const fetchUsers = async () => {
@@ -1505,20 +1510,11 @@ const UserAccounts = () => {
               <div style={{ overflowX: 'auto' }} ref={tableRef}>
                 <Table
                   columns={columns}
-                  dataSource={filteredUsers.map((user) => ({ ...user, key: user.id }))}
+                  dataSource={filteredUsers
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((user) => ({ ...user, key: user.id }))}
                   rowSelection={rowSelection}
-                  pagination={{
-                    pageSize: 10,
-                    showSizeChanger: true,
-                    showTotal: (total, range) => `Rāda ${range[0]} līdz ${range[1]} no ${total} rezultātiem`,
-                    style: {
-                      padding: '16px',
-                      borderTop: '1px solid #e5e7eb',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    },
-                  }}
+                  pagination={false}
                   className="custom-table"
                   rowClassName={(record) => {
                     const baseClass = 'custom-table-row';
@@ -1535,6 +1531,25 @@ const UserAccounts = () => {
                   }}
                 />
               </div>
+              {filteredUsers.length > 0 && (
+                <Pagination
+                  current={currentPage}
+                  total={filteredUsers.length}
+                  pageSize={pageSize}
+                  pageSizeOptions={['10', '25', '50', '100']}
+                  onChange={(page, size) => {
+                    setCurrentPage(page);
+                    if (size !== pageSize) {
+                      setPageSize(size);
+                      setCurrentPage(1);
+                    }
+                  }}
+                  onShowSizeChange={(current, size) => {
+                    setPageSize(size);
+                    setCurrentPage(1);
+                  }}
+                />
+              )}
             </>
           )}
         </Card>
