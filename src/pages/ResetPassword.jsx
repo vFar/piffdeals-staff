@@ -20,6 +20,11 @@ const ResetPassword = () => {
   
   const tokenType = searchParams.get('type') || 'recovery';
 
+  // Set document title
+  useEffect(() => {
+    document.title = 'Atjaunot paroli | Piffdeals';
+  }, []);
+
   // Security: Only allow access if user has a valid reset token
   // If user is already logged in without a token, redirect them away
   useEffect(() => {

@@ -25,6 +25,11 @@ const ActivityLogs = () => {
   const [pageSize, setPageSize] = useState(50);
   const { isSuperAdmin } = useUserRole();
 
+  // Set document title
+  useEffect(() => {
+    document.title = 'Darbību žurnāls | Piffdeals';
+  }, []);
+
   useEffect(() => {
     if (isSuperAdmin) {
       fetchLogs();
@@ -135,6 +140,7 @@ const ActivityLogs = () => {
       'invoice_sent': 'Nosūtīts rēķins klientam',
       'invoice_resent': 'Nosūtīts rēķins klientam vēlreiz',
       'invoice_status_changed': 'Mainīts rēķina statuss',
+      'invoice_marked_as_notified': 'Rēķins atzīmēts kā nosūtīts klientam',
       'invoice_paid': 'Rēķins atzīmēts kā apmaksāts',
       'invoice_cancelled': 'Rēķins atcelts',
       'invoice_viewed': 'Skatīts rēķins',

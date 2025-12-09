@@ -159,7 +159,7 @@ serve(async (req) => {
     // SECURITY: Verify invoice ownership - only creator can send emails
     const { data: invoice, error: invoiceError } = await supabaseClient
       .from('invoices')
-      .select('id, user_id, status, public_token, customer_email, last_invoice_email_sent')
+      .select('id, user_id, status, public_token, customer_email, last_invoice_email_sent, stripe_payment_link')
       .eq('id', invoiceId)
       .maybeSingle();
 
@@ -409,6 +409,47 @@ serve(async (req) => {
       console.warn(`WARNING: Could not verify accent image accessibility:`, error);
     }
 
+    // Build CTA buttons HTML based on whether payment link exists
+    const hasPaymentLink = invoice.stripe_payment_link && invoice.stripe_payment_link.trim() !== '';
+    let ctaButtonsHtml = '';
+    let paymentDisclaimerHtml = '';
+    
+    if (hasPaymentLink) {
+      ctaButtonsHtml = `
+        <!-- Payment Button (Primary) -->
+        <a href="${invoice.stripe_payment_link}" 
+           style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: 600; font-size: 16px; line-height: 1.5; text-align: center; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2); margin-bottom: 12px;">
+          Apmaksāt rēķinu šeit
+        </a>
+        <br>
+        <!-- View Invoice Button (Secondary) -->
+        <a href="${publicInvoiceUrl}" 
+           style="display: inline-block; background-color: #0068FF; color: #ffffff; text-decoration: none; padding: 14px 36px; border-radius: 8px; font-weight: 600; font-size: 15px; line-height: 1.5; text-align: center; box-shadow: 0 2px 4px rgba(0, 104, 255, 0.2);">
+          Skatīt rēķinu
+        </a>
+      `;
+      paymentDisclaimerHtml = `
+        <!-- Payment Disclaimer -->
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+          <tr>
+            <td align="center" style="padding-bottom: 24px;">
+              <div style="font-size: 13px; color: #637381; line-height: 1.6; background-color: #f0f9ff; padding: 12px 16px; border-radius: 6px; border-left: 3px solid #10b981; max-width: 500px; margin: 0 auto;">
+                <strong style="color: #10b981;">💳 Apmaksa:</strong> Izmantojiet pogu "Apmaksāt rēķinu šeit" augšā, lai veiktu maksājumu tieši no šī e-pasta. Alternatīvi, varat skatīt rēķinu un apmaksāt to vēlāk.
+              </div>
+            </td>
+          </tr>
+        </table>
+      `;
+    } else {
+      ctaButtonsHtml = `
+        <!-- View Invoice Button (Only) -->
+        <a href="${publicInvoiceUrl}" 
+           style="display: inline-block; background-color: #0068FF; color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: 600; font-size: 16px; line-height: 1.5; text-align: center; box-shadow: 0 2px 4px rgba(0, 104, 255, 0.2);">
+          Skatīt rēķinu
+        </a>
+      `;
+    }
+
     // Send email using Resend (or your preferred email service)
     // You'll need to set RESEND_API_KEY in your Supabase Edge Function secrets
     const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
@@ -534,17 +575,16 @@ serve(async (req) => {
                 </tr>
               </table>
               
-              <!-- CTA Button -->
+              <!-- CTA Buttons -->
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
                 <tr>
-                  <td align="center" style="padding-bottom: 32px;">
-                    <a href="${publicInvoiceUrl}" 
-                       style="display: inline-block; background-color: #0068FF; color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: 600; font-size: 16px; line-height: 1.5; text-align: center; box-shadow: 0 2px 4px rgba(0, 104, 255, 0.2);">
-                      Skatīt rēķinu
-                    </a>
+                  <td align="center" style="padding-bottom: ${hasPaymentLink ? '16px' : '32px'};">
+                    ${ctaButtonsHtml}
                   </td>
                 </tr>
               </table>
+              
+              ${paymentDisclaimerHtml}
               
               <!-- Alternative Link -->
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
@@ -625,7 +665,11 @@ Jums ir jauns rēķins. Šeit ir saite, lai to apskatītu un apmaksātu.
 Rēķina numurs: ${invoiceNumber}
 Kopējā summa: €${Number(total).toFixed(2)}
 
+${hasPaymentLink ? `Apmaksāt rēķinu šeit: ${invoice.stripe_payment_link}
+
 Skatīt rēķinu: ${publicInvoiceUrl}
+
+💳 Apmaksa: Izmantojiet saiti "Apmaksāt rēķinu šeit" augšā, lai veiktu maksājumu tieši no šī e-pasta. Alternatīvi, varat skatīt rēķinu un apmaksāt to vēlāk.` : `Skatīt rēķinu: ${publicInvoiceUrl}`}
 
 Ja jums ir kādi jautājumi, lūdzu, nevilcinieties ar mums sazināties.
 Paldies par sadarbību!

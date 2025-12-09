@@ -39,6 +39,11 @@ const UserAccounts = () => {
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
   const { message: messageApi, modal } = App.useApp();
 
+  // Set document title
+  useEffect(() => {
+    document.title = 'Lietotāju konti | Piffdeals';
+  }, []);
+
   useEffect(() => {
     if (isAdmin || isSuperAdmin) {
       fetchUsers();
@@ -228,12 +233,6 @@ const UserAccounts = () => {
             errorData = { error: text || 'Unknown error' };
           }
           
-          console.log('Edge function error response:', {
-            status: response.status,
-            errorData,
-            statusText: response.statusText
-          });
-          
           // Check if it's a duplicate email error
           if (response.status === 409 || 
               errorData.errorCode === 'DUPLICATE_EMAIL' || 
@@ -299,7 +298,6 @@ const UserAccounts = () => {
       
       // Show error message - check if it's a duplicate email error
       const errorMessage = error.message || String(error) || 'Kļūda izveidojot lietotāju';
-      console.log('Error message to display:', errorMessage);
       
       // Determine the error message to show
       let displayMessage = errorMessage;
@@ -530,10 +528,6 @@ const UserAccounts = () => {
         // Super_admins can suspend employees and admins (but not super_admins - already checked above)
         
         // Show confirmation, then proceed with update (same as active/inactive)
-        console.log('Bulk: Showing confirmation modal for suspension');
-        console.log('Bulk: Selected users:', selectedUsers.map(u => ({ id: u.id, role: u.role, status: u.status })));
-        console.log('Bulk: Selected row keys:', selectedRowKeys);
-        
         modal.confirm({
           title: `Vai tiešām vēlaties bloķēt ${selectedRowKeys.length === 1 ? 'izvēlēto lietotāju' : 'izvēlētos lietotājus'}?`,
           content: `${selectedRowKeys.length} ${selectedRowKeys.length === 1 ? 'lietotājs' : 'lietotāji'} vairs nevarēs pieslēgties. ${!isSuperAdmin ? 'Tikai galvenais administrators varēs atbloķēt šos kontus.' : ''}`,
@@ -541,20 +535,14 @@ const UserAccounts = () => {
           cancelText: 'Atcelt',
           okButtonProps: { danger: true },
           onOk: async () => {
-            console.log('Bulk: User clicked OK in confirmation modal');
-            console.log('Bulk: About to call performBulkStatusUpdate with status:', status);
-            console.log('Bulk: Selected row keys at modal OK:', selectedRowKeys);
-            
             try {
               await performBulkStatusUpdate(status);
-              console.log('Bulk: performBulkStatusUpdate completed successfully');
             } catch (error) {
               console.error('Bulk: Error in performBulkStatusUpdate from modal:', error);
               // Don't rethrow - let performBulkStatusUpdate handle the error display
             }
           },
           onCancel: () => {
-            console.log('Bulk: User cancelled suspension');
             setBulkActionLoading(false);
           }
         });
@@ -571,24 +559,12 @@ const UserAccounts = () => {
 
   // Perform the actual bulk status update
   const performBulkStatusUpdate = async (status) => {
-    console.log('=== performBulkStatusUpdate START ===');
-    console.log('Status:', status);
-    console.log('Selected row keys:', selectedRowKeys);
-    console.log('Is super admin:', isSuperAdmin);
-    console.log('Is admin:', isAdmin);
-    
     try {
-      console.log('About to call Supabase update...');
-      
       const { data, error } = await supabase
         .from('user_profiles')
         .update({ status })
         .in('id', selectedRowKeys)
         .select();
-      
-      console.log('Supabase update completed');
-      console.log('Response data:', data);
-      console.log('Response error:', error);
 
       if (error) {
         console.error('Database error updating status:', error);
@@ -607,42 +583,23 @@ const UserAccounts = () => {
         message.error('Nav atjaunināti lietotāji. Pārbaudiet atļaujas vai izvēlētos lietotājus.');
         return;
       }
-
-      console.log('Successfully updated users:', data);
       
       // Log activity: bulk status change
       // IMPORTANT: Get previous users BEFORE fetchUsers() updates the state
       const previousUsers = users.filter((u) => selectedRowKeys.includes(u.id));
-      console.log('Previous users for logging:', previousUsers);
-      console.log('Current users state length:', users.length);
-      console.log('Selected row keys:', selectedRowKeys);
       
       for (const updatedUser of data) {
         const previousUser = previousUsers.find((u) => u.id === updatedUser.id);
-        console.log(`Processing user ${updatedUser.username}:`, {
-          previousUser: previousUser ? 'found' : 'NOT FOUND',
-          previousStatus: previousUser?.status,
-          newStatus: status,
-          statusChanged: previousUser && previousUser.status !== status,
-          willLog: previousUser && previousUser.status !== status
-        });
         
         // ALWAYS log if we have a previous user, even if status appears the same
         // (sometimes the state might already be updated)
         if (previousUser) {
           // Log regardless - the database update already happened
           const statusActuallyChanged = previousUser.status !== status;
-          console.log(`Status actually changed: ${statusActuallyChanged} (${previousUser.status} -> ${status})`);
           
           if (statusActuallyChanged) {
           const isOwnAccount = updatedUser.id === userProfile?.id;
           const logDescription = `Mainīts lietotāja statuss: ${updatedUser.username} no "${getStatusLabel(previousUser.status).label}" uz "${getStatusLabel(status).label}"${isOwnAccount ? ' (savs konts)' : ' (cita lietotāja konts)'}${data.length > 1 ? ` (masveida maiņa)` : ''}`;
-          
-          console.log('Attempting to log status change:', {
-            actionType: ActionTypes.STATUS_CHANGED,
-            description: logDescription,
-            userId: updatedUser.id
-          });
           
           try {
             const result = await logUserAction(
@@ -662,16 +619,12 @@ const UserAccounts = () => {
               updatedUser.id
             );
             
-            console.log('Log result:', result);
-            
             if (!result.success) {
               console.error('Failed to log status change:', result.error);
               console.error('Error details:', {
                 message: result.error?.message,
                 stack: result.error?.stack
               });
-            } else {
-              console.log('Successfully logged status change, log ID:', result.logId);
             }
           } catch (logError) {
             console.error('Exception while logging status change:', logError);
@@ -916,7 +869,6 @@ const UserAccounts = () => {
             cancelText: 'Atcelt',
             okButtonProps: { danger: true },
             onOk: async () => {
-              console.log('Edit modal: User confirmed suspension, calling performUserUpdate');
               try {
                 await performUserUpdate(values);
                 resolve();
@@ -926,7 +878,6 @@ const UserAccounts = () => {
               }
             },
             onCancel: () => {
-              console.log('Edit modal: User cancelled suspension');
               setSubmitting(false);
               resolve(); // Resolve to allow form to complete
             }
@@ -946,13 +897,6 @@ const UserAccounts = () => {
   // Perform the actual user update
   const performUserUpdate = async (values) => {
     try {
-      console.log('performUserUpdate called with:', {
-        userId: editingUser.id,
-        values,
-        isSuperAdmin,
-        isAdmin
-      });
-
       const { data, error } = await supabase
         .from('user_profiles')
         .update({
@@ -963,8 +907,6 @@ const UserAccounts = () => {
         })
         .eq('id', editingUser.id)
         .select();
-
-      console.log('Update response:', { data, error });
 
       if (error) {
         console.error('Database error updating user:', error);
@@ -982,8 +924,6 @@ const UserAccounts = () => {
         message.error('Nav atjaunināti lietotāja dati. Pārbaudiet atļaujas.');
         return;
       }
-
-      console.log('Successfully updated user:', data[0]);
       
       const updatedUser = data[0];
       const changes = [];
@@ -992,17 +932,6 @@ const UserAccounts = () => {
         target_user_email: editingUser.email,
         target_user_username: editingUser.username,
       };
-
-      console.log('Comparing changes:', {
-        editingUserStatus: editingUser.status,
-        valuesStatus: values.status,
-        editingUserRole: editingUser.role,
-        valuesRole: values.role,
-        editingUserUsername: editingUser.username,
-        valuesName: values.name,
-        editingUserEmail: editingUser.email,
-        valuesEmail: values.email
-      });
 
       // Track what changed
       if (editingUser.username !== values.name) {
@@ -1025,10 +954,6 @@ const UserAccounts = () => {
         details.old_status = editingUser.status;
         details.new_status = values.status;
       }
-
-      console.log('Changes detected:', changes);
-      console.log('Changes length:', changes.length);
-      console.log('Will log?', changes.length > 0);
 
       // Log activity: user updated
       if (changes.length > 0) {
@@ -1071,13 +996,6 @@ const UserAccounts = () => {
         // Enhance description to indicate if it's own account or other user's account
         const enhancedDescription = `${description}: ${editingUser.username}${isOwnAccount ? ' (savs konts)' : ' (cita lietotāja konts)'}`;
         
-        console.log('Attempting to log user update:', {
-          actionType,
-          description: enhancedDescription,
-          userId: editingUser.id,
-          details: enhancedDetails
-        });
-        
         try {
           const result = await logUserAction(
             actionType,
@@ -1086,16 +1004,12 @@ const UserAccounts = () => {
             editingUser.id
           );
           
-          console.log('Log result:', result);
-          
           if (!result.success) {
             console.error('Failed to log user update:', result.error);
             console.error('Error details:', {
               message: result.error?.message,
               stack: result.error?.stack
             });
-          } else {
-            console.log('Successfully logged user update, log ID:', result.logId);
           }
         } catch (logError) {
           console.error('Exception while logging user update:', logError);

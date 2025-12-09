@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Card, Row, Col, Table, Typography, Select, Spin, DatePicker, Statistic, Empty, Tooltip } from 'antd';
-import { InfoCircleOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Table, Typography, Select, Spin, DatePicker, Statistic, Empty, Tooltip, Alert } from 'antd';
+import { InfoCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import {
   Chart,
   CategoryScale,
@@ -45,6 +45,12 @@ const { RangePicker } = DatePicker;
 const SalesCharts = () => {
   const { userProfile, isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
   const [loading, setLoading] = useState(true);
+  const [showDisclaimer, setShowDisclaimer] = useState(true);
+
+  // Set document title
+  useEffect(() => {
+    document.title = 'Pārdošanas grafiki | Piffdeals';
+  }, []);
   
   // Chart refs
   const revenueChartRef = useRef(null);
@@ -86,6 +92,20 @@ const SalesCharts = () => {
   });
   
   const [employees, setEmployees] = useState([]);
+
+  // Check localStorage for disclaimer visibility
+  useEffect(() => {
+    const disclaimerClosed = localStorage.getItem('salesChartsDisclaimerClosed');
+    if (disclaimerClosed === 'true') {
+      setShowDisclaimer(false);
+    }
+  }, []);
+
+  // Handle disclaimer close
+  const handleDisclaimerClose = () => {
+    setShowDisclaimer(false);
+    localStorage.setItem('salesChartsDisclaimerClosed', 'true');
+  };
 
   // Fetch employees list (for admin filter)
   useEffect(() => {
@@ -792,6 +812,24 @@ const SalesCharts = () => {
             Detalizēta pārdošanas analīze un statistika
           </Text>
         </div>
+
+        {/* Disclaimer */}
+        {showDisclaimer && (
+          <Alert
+            message="Svarīga informācija par pārdošanas datiem"
+            description="Visi pārdošanas grafiki un statistika tiek ģenerēti tikai no rēķiniem, kas izveidoti šajā sistēmā. Šie dati NAV saistīti ar faktisko Mozello ecommerce veikalu un neatspoguļo visus veikala pārdošanas datus."
+            type="info"
+            icon={<ExclamationCircleOutlined />}
+            showIcon
+            closable
+            onClose={handleDisclaimerClose}
+            style={{
+              borderRadius: '12px',
+              border: '1px solid #bfdbfe',
+              background: '#eff6ff',
+            }}
+          />
+        )}
 
         {/* Filters */}
         <Card

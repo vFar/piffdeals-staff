@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Card, Row, Col, Table, Typography, Select, Spin, Tooltip } from 'antd';
-import { InfoCircleOutlined } from '@ant-design/icons';
+import { Card, Row, Col, Table, Typography, Select, Spin, Tooltip, Alert } from 'antd';
+import { InfoCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import {
   Chart,
   CategoryScale,
@@ -68,6 +68,7 @@ const Dashboard = () => {
   });
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState('current'); // 'current', 'last', 'last2'
+  const [showDisclaimer, setShowDisclaimer] = useState(true);
 
   // Memoize admin status to prevent unnecessary re-renders
   const isAdminUser = useMemo(() => isAdmin || isSuperAdmin, [isAdmin, isSuperAdmin]);
@@ -94,12 +95,31 @@ const Dashboard = () => {
     };
   };
 
+  // Set document title
+  useEffect(() => {
+    document.title = 'Informācijas panelis | Piffdeals';
+  }, []);
+
+  // Check localStorage for disclaimer visibility
+  useEffect(() => {
+    const disclaimerClosed = localStorage.getItem('salesChartsDisclaimerClosed');
+    if (disclaimerClosed === 'true') {
+      setShowDisclaimer(false);
+    }
+  }, []);
+
   // Reset fetch flag when user changes
   useEffect(() => {
     if (userId && hasFetchedRef.current !== userId) {
       hasFetchedRef.current = false;
     }
   }, [userId]);
+
+  // Handle disclaimer close
+  const handleDisclaimerClose = () => {
+    setShowDisclaimer(false);
+    localStorage.setItem('salesChartsDisclaimerClosed', 'true');
+  };
 
   // Fetch dashboard data
   useEffect(() => {
@@ -675,6 +695,24 @@ const Dashboard = () => {
             {userName ? `Laipni lūdzam atpakaļ, ${userName}!` : 'Laipni lūdzam atpakaļ!'}
           </Text>
         </div>
+
+        {/* Disclaimer */}
+        {showDisclaimer && (
+          <Alert
+            message="Svarīga informācija par pārdošanas datiem"
+            description="Visi pārdošanas grafiki un statistika tiek ģenerēti tikai no rēķiniem, kas izveidoti šajā sistēmā. Šie dati NAV saistīti ar faktisko Mozello ecommerce veikalu un neatspoguļo visus veikala pārdošanas datus."
+            type="info"
+            icon={<ExclamationCircleOutlined />}
+            showIcon
+            closable
+            onClose={handleDisclaimerClose}
+            style={{
+              borderRadius: '12px',
+              border: '1px solid #bfdbfe',
+              background: '#eff6ff',
+            }}
+          />
+        )}
 
         {/* Stats Cards */}
         <Row gutter={[24, 24]}>

@@ -254,15 +254,22 @@ But this makes queries and reports harder.
 
    **IMPORTANT**: Invoices are unique to their creator. Only the creator can edit or manage their own invoices.
 
-   **`draft`** - Being created, not sent yet
+   **Status Flow**: `draft` → `sent` → (`paid`, `pending`, `overdue`, `cancelled`)
+
+   **`draft`** (Melnraksts) - Being created, not ready to send yet
    - ✅ Can be edited by: **ONLY the creator** (employee who created it)
    - ✅ Can be deleted by: **ONLY the creator**
-   - ✅ Can be sent by: **ONLY the creator** (changes to `sent`)
+   - ✅ Can be sent: **ONLY the creator** (via "Gatavs rēķins" button - sends email and changes to `sent`)
    - ❌ Cannot be paid (must be sent first)
    - 🗑️ **Auto-deletion**: Draft invoices older than 3 days are automatically deleted by cron job
    - 🎨 **UI Highlight**: Draft invoices are highlighted with yellow background in the table
+   - 📧 **Sending**: When clicking "Gatavs rēķins", a popconfirm appears. On confirmation, the system:
+     - Creates Stripe payment link (if not exists)
+     - Ensures public_token exists
+     - Sends email to customer
+     - Changes status to `sent`
 
-   **`sent`** - Sent to client, awaiting payment
+   **`sent`** (Nosūtīts) - Sent to client, awaiting payment
    - ❌ **LOCKED** - Cannot be edited by anyone (including creator)
    - ✅ Can resend email: **ONLY the creator**
    - ✅ Can mark as paid: **ONLY the creator** (manual verification)

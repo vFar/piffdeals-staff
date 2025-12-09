@@ -15,6 +15,11 @@ const Login = () => {
   const [blockedUntil, setBlockedUntil] = useState(null);
   const [timeRemaining, setTimeRemaining] = useState(null);
 
+  // Set document title
+  useEffect(() => {
+    document.title = 'Pieslēgties | Piffdeals';
+  }, []);
+
   // Load remembered email on mount
   useEffect(() => {
     const rememberedEmail = localStorage.getItem('rememberedEmail');

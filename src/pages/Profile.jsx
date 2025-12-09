@@ -19,6 +19,11 @@ const Profile = () => {
   const navigate = useNavigate();
   const { message: messageApi } = App.useApp();
 
+  // Set document title
+  useEffect(() => {
+    document.title = 'Profils | Piffdeals';
+  }, []);
+
   // Handle password change
   const handlePasswordChange = async (values) => {
     try {
@@ -163,7 +168,6 @@ const Profile = () => {
         await signOut();
       } catch (signOutError) {
         // User is already deleted, so sign out might fail - that's expected
-        console.log('Sign out after deletion (expected to potentially fail):', signOutError);
       }
 
       messageApi.success('Konts veiksmīgi izdzēsts');

@@ -29,6 +29,11 @@ const InvoiceTemplates = () => {
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [editFormData, setEditFormData] = useState({ template_name: '', notes: '' });
 
+  // Set document title
+  useEffect(() => {
+    document.title = 'Rēķinu šabloni | Piffdeals';
+  }, []);
+
   useEffect(() => {
     fetchTemplates();
   }, [currentUser]);

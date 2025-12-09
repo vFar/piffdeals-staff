@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Layout, Menu, Input, Button, Dropdown, Modal, message, Spin, Typography, Empty, Drawer } from 'antd';
+import { Layout, Menu, Input, Button, Dropdown, Modal, App, Spin, Typography, Empty, Drawer } from 'antd';
 import {
   DashboardOutlined,
   SettingOutlined,
@@ -29,6 +29,7 @@ const { Header, Sider, Content } = Layout;
 const DashboardLayout = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { message } = App.useApp();
   const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
   const { currentUser, userProfile, signOut } = useAuth();
   const { isAdmin, isSuperAdmin, loading: roleLoading, userProfile: roleProfile } = useUserRole();

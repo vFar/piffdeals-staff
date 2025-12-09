@@ -22,9 +22,9 @@ const PublicInvoice = () => {
 
   useEffect(() => {
     if (invoice) {
-      document.title = `Rēķins ${invoice.invoice_number}`;
+      document.title = `Rēķins ${invoice.invoice_number} | Piffdeals`;
     } else {
-      document.title = 'Rēķins';
+      document.title = 'Rēķins | Piffdeals';
     }
   }, [invoice]);
 
@@ -239,7 +239,7 @@ const PublicInvoice = () => {
         {/* Paid Watermark */}
         {invoice.status === 'paid' && (
           <div style={{
-            position: 'fixed',
+            position: 'absolute',
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%) rotate(-45deg)',

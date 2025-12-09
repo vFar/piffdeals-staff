@@ -84,14 +84,6 @@ export const logActivity = async ({
 
     if (token && supabaseUrl) {
       try {
-        console.log('[ActivityLog] Attempting to log via Edge Function (with IP capture):', {
-          actionType,
-          actionCategory,
-          description,
-          userId: user.id,
-          username: userUsername
-        });
-
         const response = await fetch(edgeFunctionUrl, {
           method: 'POST',
           headers: {
@@ -112,7 +104,6 @@ export const logActivity = async ({
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
-            console.log('[ActivityLog] Successfully logged via Edge Function, log ID:', result.logId);
             return { success: true, logId: result.logId };
           } else {
             console.warn('[ActivityLog] Edge Function returned error:', result.error);
@@ -131,14 +122,6 @@ export const logActivity = async ({
 
     // Fallback: Call the database function directly (for backward compatibility)
     // Note: This won't have IP address in browser context, but Edge Function should work
-    console.log('[ActivityLog] Attempting to log via RPC (fallback):', {
-      actionType,
-      actionCategory,
-      description,
-      userId: user.id,
-      username: userUsername
-    });
-    
     const { data, error } = await supabase.rpc('log_activity', {
       p_user_id: user.id,
       p_action_type: actionType,
@@ -175,7 +158,7 @@ export const logActivity = async ({
             details: details,
             target_type: targetType,
             target_id: targetId,
-            ip_address: finalIpAddress,
+            ip_address: ipAddress,
             user_agent: finalUserAgent,
           })
           .select('id')
@@ -196,7 +179,6 @@ export const logActivity = async ({
           };
         }
         
-        console.log('[ActivityLog] Successfully logged via direct insert, log ID:', insertData.id);
         return { success: true, logId: insertData.id };
       } catch (fallbackError) {
         console.error('[ActivityLog] Fallback insert exception:', fallbackError);
@@ -224,7 +206,7 @@ export const logActivity = async ({
             details: details,
             target_type: targetType,
             target_id: targetId,
-            ip_address: finalIpAddress,
+            ip_address: ipAddress,
             user_agent: finalUserAgent,
           })
           .select('id')
@@ -235,7 +217,6 @@ export const logActivity = async ({
           return { success: false, error: new Error('Failed to log activity: RPC returned no data and direct insert failed') };
         }
         
-        console.log('[ActivityLog] Successfully logged via direct insert, log ID:', insertData.id);
         return { success: true, logId: insertData.id };
       } catch (fallbackError) {
         console.error('[ActivityLog] Fallback insert exception:', fallbackError);
@@ -243,7 +224,6 @@ export const logActivity = async ({
       }
     }
 
-    console.log('[ActivityLog] Successfully logged via RPC, log ID:', data);
     return { success: true, logId: data };
   } catch (error) {
     console.error('[ActivityLog] Unexpected error:', error);
@@ -271,6 +251,7 @@ export const ActionTypes = {
   INVOICE_SENT: 'invoice_sent',
   INVOICE_RESENT: 'invoice_resent',
   INVOICE_STATUS_CHANGED: 'invoice_status_changed',
+  INVOICE_MARKED_AS_NOTIFIED: 'invoice_marked_as_notified',
   INVOICE_PAID: 'invoice_paid',
   INVOICE_CANCELLED: 'invoice_cancelled',
   INVOICE_VIEWED: 'invoice_viewed',

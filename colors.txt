@@ -1,0 +1,22 @@
+Color definitions from index.html (for future reference):
+
+Primary Colors:
+- primary: #0068FF
+- secondary: #83AEEA
+- accent: #4F91ED
+- lightBlueBackground: #EBF3FF
+- whiter: #ffffff
+
+Font Family:
+- display: ["Inter", "sans-serif"]
+
+Border Radius:
+- DEFAULT: 0.25rem
+- lg: 0.5rem
+- xl: 0.75rem
+- full: 9999px
+
+
+
+
+

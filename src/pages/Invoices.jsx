@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button, Table, message, Modal, Input, Dropdown, Card, Typography, Spin, Tag, App, Popconfirm, Tooltip } from 'antd';
-import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import Pagination from '../components/Pagination';
@@ -31,6 +31,11 @@ const Invoices = () => {
   const [emailCooldown, setEmailCooldown] = useState(0);
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
   const { notifyEmailSendFailed, notifyInvoicePaid } = useNotifications();
+
+  // Set document title
+  useEffect(() => {
+    document.title = 'Rēķini | Piffdeals';
+  }, []);
 
   useEffect(() => {
     // Only fetch invoices when userProfile is loaded
@@ -69,15 +74,27 @@ const Invoices = () => {
       return;
     }
 
+    // Status mapping: English (database) -> Latvian (display)
+    const statusLabels = {
+      draft: 'melnraksts',
+      sent: 'nosūtīts',
+      paid: 'apmaksāts',
+      pending: 'gaida',
+      overdue: 'kavēts',
+      cancelled: 'atcelts',
+    };
+
     const lowerSearch = searchText.toLowerCase();
     const filtered = invoices.filter((invoice) => {
       const invoiceNumber = (invoice.invoice_number || '').toLowerCase();
       const customerName = (invoice.customer_name || '').toLowerCase();
       const status = (invoice.status || '').toLowerCase();
+      const statusLabel = statusLabels[invoice.status] || '';
       
       return invoiceNumber.includes(lowerSearch) || 
              customerName.includes(lowerSearch) || 
-             status.includes(lowerSearch);
+             status.includes(lowerSearch) ||
+             statusLabel.includes(lowerSearch);
     });
 
     setFilteredInvoices(filtered);
@@ -287,15 +304,12 @@ const Invoices = () => {
       
       // If no session, session error, or token is expired/expiring soon, try to refresh
       if (!session || sessionError || isTokenExpired || !session.access_token) {
-        console.log('Session expired or missing, attempting to refresh...');
-        
         // Try to refresh the session
         const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession();
         
         if (refreshedSession && refreshedSession.access_token) {
           session = refreshedSession;
           sessionError = null;
-          console.log('Session refreshed successfully');
         } else if (refreshError) {
           console.error('Failed to refresh session:', refreshError);
           
@@ -312,8 +326,6 @@ const Invoices = () => {
         console.error('No valid session after refresh attempt');
         throw new Error('Nav autentificēts. Lūdzu, pieslēdzieties atkārtoti.');
       }
-      
-      console.log('Using session token (expires at:', session.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'unknown', ')');
       
       // Call Supabase Edge Function to send email with timeout
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, ''); // Remove trailing slash
@@ -575,34 +587,8 @@ const Invoices = () => {
         notifyEmailSendFailed(selectedInvoice, errorMessage);
       }
       
-      // Still update status to 'sent' even if email fails (for resend scenarios)
-      // This allows users to manually share the link even if email fails
-      if (currentInvoice.status !== 'sent') {
-        try {
-          const sentAt = new Date().toISOString();
-          const { error: updateError } = await supabase
-            .from('invoices')
-            .update({ 
-              status: 'sent',
-              sent_at: sentAt
-            })
-            .eq('id', invoiceId);
-          
-          if (!updateError) {
-            setSelectedInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
-            // Also update in invoices list to keep data in sync
-            setInvoices(prev => prev.map(inv => 
-              inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
-            ));
-            setFilteredInvoices(prev => prev.map(inv => 
-              inv.id === invoiceId ? { ...inv, status: 'sent', sent_at: sentAt } : inv
-            ));
-          }
-        } catch (statusError) {
-          console.error('Error updating invoice status after email failure:', statusError);
-          // Don't show error to user - status update failure is not critical
-        }
-      }
+      // DO NOT update sent_at if email fails - only set it when email is actually sent successfully
+      // Users can still manually share the link, but sent_at should remain NULL until email is sent
       
       // Log error for debugging (skip for cooldown errors as they're user-facing)
       if (errorType !== 'cooldown') {
@@ -616,6 +602,41 @@ const Invoices = () => {
       }
     } finally {
       setSendingEmail(false);
+    }
+  };
+
+  const handleMarkAsNotified = async (invoice) => {
+    try {
+      const { error } = await supabase
+        .from('invoices')
+        .update({ 
+          sent_at: new Date().toISOString()
+        })
+        .eq('id', invoice.id);
+
+      if (error) throw error;
+
+      // Log the action
+      const isOwnInvoice = invoice.user_id === userProfile?.id;
+      await logInvoiceAction(
+        ActionTypes.INVOICE_MARKED_AS_NOTIFIED,
+        `Rēķins ${invoice.invoice_number} atzīmēts kā nosūtīts klientam (saite nosūtīta bez e-pasta)${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
+        {
+          invoice_number: invoice.invoice_number,
+          customer_name: invoice.customer_name,
+          is_own_invoice: isOwnInvoice,
+          is_other_user_invoice: !isOwnInvoice,
+          creator_username: invoice.creator?.username || 'Nezināms',
+          marked_by: userProfile?.username || 'Nezināms',
+          notification_method: 'link_only',
+        },
+        invoice.id
+      );
+
+      message.success('Rēķins atzīmēts kā nosūtīts klientam');
+      fetchInvoices();
+    } catch (error) {
+      message.error('Neizdevās atzīmēt rēķinu');
     }
   };
 
@@ -837,11 +858,54 @@ const Invoices = () => {
       render: (amount) => <Text style={{ fontWeight: 500, color: '#111827' }}>€{parseFloat(amount).toFixed(2)}</Text>,
     },
     {
+      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Klients informēts</span>,
+      dataIndex: 'sent_at',
+      key: 'sent_at',
+      sorter: (a, b) => {
+        const aHasSent = a.sent_at ? 1 : 0;
+        const bHasSent = b.sent_at ? 1 : 0;
+        return aHasSent - bHasSent;
+      },
+      sortDirections: ['ascend', 'descend'],
+      width: 120,
+      render: (sentAt, record) => {
+        const isNotified = !!sentAt;
+        return (
+          <Tooltip
+            title={
+              isNotified
+                ? `Klients informēts: ${sentAt ? formatDate(sentAt) : 'Nezināms datums'}`
+                : 'Klients nav informēts. Automātiskie atgādinājuma e-pasti nedarbosies.'
+            }
+            placement="top"
+          >
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              {isNotified ? (
+                <CheckCircleOutlined
+                  style={{
+                    fontSize: '20px',
+                    color: '#10b981',
+                  }}
+                />
+              ) : (
+                <CloseCircleOutlined
+                  style={{
+                    fontSize: '20px',
+                    color: '#ef4444',
+                  }}
+                />
+              )}
+            </div>
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Statuss</span>,
       dataIndex: 'status',
       key: 'status',
       sorter: (a, b) => {
-        const statusOrder = { 'paid': 5, 'sent': 4, 'pending': 3, 'draft': 2, 'overdue': 1, 'cancelled': 0 };
+        const statusOrder = { 'paid': 6, 'sent': 5, 'pending': 4, 'draft': 2, 'overdue': 1, 'cancelled': 0 };
         return (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0);
       },
       sortDirections: ['ascend', 'descend'],
@@ -849,7 +913,7 @@ const Invoices = () => {
         const statusConfig = {
           draft: { 
             label: 'Melnraksts',
-            description: 'Rēķins ir izveidots, bet vēl nav nosūtīts klientam. Var rediģēt un dzēst.'
+            description: 'Rēķins ir izveidots, bet vēl nav gatavs nosūtīšanai. Var rediģēt un dzēst.'
           },
           sent: { 
             label: 'Nosūtīts',
@@ -1014,6 +1078,50 @@ const Invoices = () => {
             icon: <LinkOutlined />,
             label: 'Skatīt maksājuma saiti',
             onClick: () => handleViewPaymentLink(record),
+          });
+        }
+
+        // Mark as notified - only creator OR admin/super_admin (not other employees)
+        // Creator can mark their own invoice, admins/super_admins can mark any invoice
+        // Only available when: invoice has public_token (link exists), sent_at is null (email NOT sent), and status is 'sent'
+        // This is for cases where customer received the link but NOT the email
+        const canMarkNotified = !record.sent_at && record.public_token && record.status === 'sent' && (isCreator || isAdmin || isSuperAdmin);
+        if (canMarkNotified) {
+          menuItems.push({
+            key: 'mark-notified',
+            icon: <CheckCircleOutlined />,
+            label: 'Atzīmēt kā nosūtīts klientam',
+            onClick: () => {
+              modal.confirm({
+                title: 'Atzīmēt kā nosūtīts klientam?',
+                content: (
+                  <div>
+                    <p style={{ marginBottom: '12px', lineHeight: '1.6' }}>
+                      Vai tiešām vēlaties atzīmēt, ka rēķins <strong>{record.invoice_number}</strong> ir nosūtīts klientam?
+                    </p>
+                    <p style={{ 
+                      marginBottom: '12px', 
+                      padding: '12px', 
+                      background: '#fef3c7', 
+                      borderRadius: '6px',
+                      border: '1px solid #fbbf24',
+                      lineHeight: '1.6',
+                      fontSize: '13px',
+                      color: '#92400e'
+                    }}>
+                      <strong>⚠️ Svarīgi:</strong> Šī opcija ir pieejama tikai tad, ja klients ir saņēmis rēķina saiti, bet nav saņēmis e-pastu. Ja klients ir saņēmis e-pastu, šī opcija nav nepieciešama.
+                    </p>
+                    <p style={{ marginBottom: 0, fontSize: '13px', color: '#6b7280', lineHeight: '1.6' }}>
+                      Šī darbība ļaus automātiskajiem atgādinājuma e-pastiem darboties.
+                    </p>
+                  </div>
+                ),
+                okText: 'Atzīmēt',
+                cancelText: 'Atcelt',
+                onOk: () => handleMarkAsNotified(record),
+                width: 500,
+              });
+            },
           });
         }
 

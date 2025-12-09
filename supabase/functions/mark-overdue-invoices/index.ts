@@ -1,6 +1,5 @@
 // Mark Overdue Invoices Edge Function
-// TESTING MODE: Marks invoices as overdue when due_date is more than 10 seconds in the past
-// (Normally: Marks invoices as overdue when due_date has passed)
+// Marks invoices as overdue when due_date has passed (due_date < CURRENT_DATE)
 // Should be called daily via cron job (or manually for testing)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
@@ -23,43 +22,37 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // TESTING MODE: Check for invoices overdue by 10 seconds instead of checking if date passed
-    // Get all sent/pending invoices with due_date
+    // Get current date in YYYY-MM-DD format (UTC)
+    const today = new Date()
+    const todayStr = today.toISOString().split('T')[0] // YYYY-MM-DD
+    
+    // Get all sent/pending invoices with due_date that has passed
+    // Use SQL to filter: due_date < CURRENT_DATE
     const { data: allInvoices, error: fetchError } = await supabase
       .from('invoices')
       .select('id, invoice_number, due_date, status')
       .in('status', ['sent', 'pending'])
       .not('due_date', 'is', null)
+      .lt('due_date', todayStr) // due_date < today
 
     if (fetchError) {
       throw fetchError
     }
 
-    // Filter in JavaScript: due_date (as timestamp at midnight) must be more than 10 seconds ago
-    const now = Date.now()
-    const threshold = now - (10 * 1000) // 10 seconds ago
-    
     // Debug: Log all invoices found
     const debugInfo = {
       total_found: allInvoices?.length || 0,
-      current_time: new Date(now).toISOString(),
-      threshold_time: new Date(threshold).toISOString(),
+      current_date: todayStr,
       invoices_checked: (allInvoices || []).map(inv => ({
         id: inv.id,
         invoice_number: inv.invoice_number,
         status: inv.status,
         due_date: inv.due_date,
-        due_date_timestamp: inv.due_date ? new Date(inv.due_date + 'T00:00:00Z').toISOString() : null,
-        is_overdue: inv.due_date ? new Date(inv.due_date + 'T00:00:00Z').getTime() < threshold : false
+        is_overdue: inv.due_date ? inv.due_date < todayStr : false
       }))
     }
     
-    const overdueInvoices = (allInvoices || []).filter(inv => {
-      if (!inv.due_date) return false
-      // Convert due_date (YYYY-MM-DD) to timestamp at midnight UTC
-      const dueDateTimestamp = new Date(inv.due_date + 'T00:00:00Z').getTime()
-      return dueDateTimestamp < threshold
-    })
+    const overdueInvoices = allInvoices || []
 
     if (overdueInvoices.length === 0) {
       return new Response(

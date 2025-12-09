@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   App,
@@ -20,7 +20,7 @@ import {
   Tooltip,
   Typography
 } from 'antd';
-import { DeleteOutlined, PlusOutlined, SaveOutlined, SendOutlined, ArrowLeftOutlined, EditOutlined, LinkOutlined, MailOutlined, DownloadOutlined, CopyOutlined, EyeOutlined, WarningOutlined, CloseOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, SaveOutlined, SendOutlined, ArrowLeftOutlined, EditOutlined, LinkOutlined, MailOutlined, DownloadOutlined, CopyOutlined, EyeOutlined, WarningOutlined, CloseOutlined, InfoCircleOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -48,29 +48,79 @@ const ViewInvoice = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [shareMethodModal, setShareMethodModal] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const isInitialLoad = useRef(true);
+
+  // Set document title
+  useEffect(() => {
+    if (invoice) {
+      document.title = `Rēķins ${invoice.invoice_number} | Piffdeals`;
+    } else {
+      document.title = 'Rēķins | Piffdeals';
+    }
+  }, [invoice]);
   const [preparingToSend, setPreparingToSend] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [lastEmailSent, setLastEmailSent] = useState(null);
   const [customerNotified, setCustomerNotified] = useState(false); // Track if customer was notified
   const [warningModalVisible, setWarningModalVisible] = useState(false);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0); // Cooldown remaining in seconds
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
 
 
   useEffect(() => {
     // Only fetch invoice when userProfile is loaded
     if (invoiceNumber && userProfile) {
-      fetchInvoiceData();
+      isInitialLoad.current = true;
+      fetchInvoiceData(true);
     }
   }, [invoiceNumber, userProfile]);
 
-  const fetchInvoiceData = async () => {
+  // Calculate cooldown from invoice.last_invoice_email_sent
+  useEffect(() => {
+    if (invoice?.last_invoice_email_sent) {
+      const lastSent = new Date(invoice.last_invoice_email_sent);
+      const now = new Date();
+      const timeSinceLastSent = now.getTime() - lastSent.getTime();
+      const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+      
+      if (timeSinceLastSent < COOLDOWN_MS) {
+        const remaining = Math.ceil((COOLDOWN_MS - timeSinceLastSent) / 1000);
+        setCooldownRemaining(remaining);
+      } else {
+        setCooldownRemaining(0);
+      }
+    } else {
+      setCooldownRemaining(0);
+    }
+  }, [invoice?.last_invoice_email_sent]);
+
+  // Update cooldown timer every second
+  useEffect(() => {
+    if (cooldownRemaining > 0) {
+      const timer = setInterval(() => {
+        setCooldownRemaining((prev) => {
+          if (prev <= 1) {
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+  }, [cooldownRemaining]);
+
+  const fetchInvoiceData = async (showLoading = true) => {
     try {
-      setLoading(true);
+      // Only show loading spinner on initial load
+      if (showLoading && isInitialLoad.current) {
+        setLoading(true);
+      }
 
       // Decode the invoice number in case it was URL encoded
       const decodedInvoiceNumber = decodeURIComponent(invoiceNumber);
 
-      // Fetch invoice by invoice_number
+      // Fetch invoice first (critical - show immediately)
       const { data: invoiceData, error: invoiceError } = await supabase
         .from('invoices')
         .select('*')
@@ -90,48 +140,10 @@ const ViewInvoice = () => {
         return;
       }
 
-      // Fetch creator's profile to check their role
-      let creatorProfile = null;
-      if (invoiceData.user_id) {
-        const { data: creatorData, error: creatorError } = await supabase
-          .from('user_profiles')
-          .select('id, username, email, role')
-          .eq('id', invoiceData.user_id)
-          .maybeSingle();
-        
-        if (!creatorError && creatorData) {
-          creatorProfile = creatorData;
-        }
-      }
+      // Set invoice immediately (don't wait for creator/items) for instant UI render
+      setInvoice(invoiceData);
 
-      // Add creator info to invoice data
-      setInvoice({
-        ...invoiceData,
-        creator: creatorProfile
-      });
-
-      // Fetch invoice items
-      const { data: itemsData, error: itemsError } = await supabase
-        .from('invoice_items')
-        .select('*')
-        .eq('invoice_id', invoiceData.id);
-
-      if (itemsError) throw itemsError;
-
-      // Transform items to match the format expected by the form
-      const transformedItems = itemsData.map((item, index) => ({
-        id: index + 1,
-        productHandle: item.product_id || '',
-        name: item.product_name,
-        quantity: item.quantity,
-        price: parseFloat(item.unit_price),
-        total: parseFloat(item.total),
-        stock: null
-      }));
-
-      setItems(transformedItems);
-
-      // Set form values
+      // Set form values immediately with invoice data
       form.setFieldsValue({
         clientName: invoiceData.customer_name,
         clientEmail: invoiceData.customer_email,
@@ -141,11 +153,57 @@ const ViewInvoice = () => {
         notes: invoiceData.notes || '',
       });
 
+      // Hide loading immediately - page is now usable (items/creator load in background)
+      setLoading(false);
+      isInitialLoad.current = false;
+
+      // Fetch creator's profile and invoice items in background (non-blocking)
+      Promise.all([
+        invoiceData.user_id
+          ? supabase
+              .from('user_profiles')
+              .select('id, username, email, role')
+              .eq('id', invoiceData.user_id)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+        supabase
+          .from('invoice_items')
+          .select('*')
+          .eq('invoice_id', invoiceData.id)
+      ]).then(([creatorResult, itemsDataResult]) => {
+        const { data: creatorData, error: creatorError } = creatorResult;
+        const { data: itemsData, error: itemsError } = itemsDataResult;
+
+        if (itemsError) {
+          console.error('Error fetching items:', itemsError);
+          return;
+        }
+
+        const creatorProfile = (!creatorError && creatorData) ? creatorData : null;
+
+        // Update invoice with creator info (non-blocking)
+        setInvoice(prev => prev ? { ...prev, creator: creatorProfile } : null);
+
+        // Transform items immediately without waiting for products
+        const transformedItems = itemsData.map((item, index) => ({
+          id: index + 1,
+          productHandle: item.product_id || '',
+          name: item.product_name,
+          quantity: item.quantity,
+          price: parseFloat(item.unit_price),
+          total: parseFloat(item.total),
+          stock: null,
+          imageUrl: null // Will be loaded in background
+        }));
+
+        setItems(transformedItems);
+      }).catch(error => {
+        console.error('Error loading invoice details:', error);
+      });
+
     } catch (error) {
       antMessage.error('Neizdevās ielādēt rēķinu');
       navigate('/invoices');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -170,7 +228,7 @@ const ViewInvoice = () => {
 
   const handleCancelEdit = () => {
     setIsEditing(false);
-    fetchInvoiceData(); // Reload original data
+    fetchInvoiceData(false); // Reload original data without loading spinner
   };
 
   const getProductTitle = (product) => {
@@ -197,6 +255,7 @@ const ViewInvoice = () => {
     const title = getProductTitle(product);
     const price = getProductPrice(product);
     const stock = product.stock;
+    const imageUrl = product.pictures?.[0]?.url || null;
 
     setItems(items.map(item => {
       if (item.id === id) {
@@ -210,6 +269,7 @@ const ViewInvoice = () => {
           stock: stock,
           quantity: adjustedQuantity,
           total: calculateItemTotal(adjustedQuantity, price),
+          imageUrl: imageUrl,
         };
         return updatedItem;
       }
@@ -235,7 +295,7 @@ const ViewInvoice = () => {
 
   const addItem = () => {
     const newId = Math.max(...items.map(i => i.id), 0) + 1;
-    setItems([...items, { id: newId, productHandle: '', name: '', quantity: 1, price: 0, total: 0, stock: null }]);
+    setItems([...items, { id: newId, productHandle: '', name: '', quantity: 1, price: 0, total: 0, stock: null, imageUrl: null }]);
   };
 
   const removeItem = (id) => {
@@ -343,7 +403,7 @@ const ViewInvoice = () => {
       setSaving(false);
       message.success('Izmaiņas saglabātas!');
       setIsEditing(false);
-      fetchInvoiceData(); // Reload data
+      fetchInvoiceData(false); // Reload data without loading spinner
     } catch (error) {
       if (error.errorFields) {
         message.error('Aizpildiet visus laukus');
@@ -421,8 +481,17 @@ const ViewInvoice = () => {
       // ALWAYS ensure payment link exists before copying
       if (!invoice.stripe_payment_link) {
         try {
-          await stripeService.createPaymentLink(invoice.id);
-          await fetchInvoiceData(); // Refresh to get the payment link
+          const paymentLinkData = await stripeService.createPaymentLink(invoice.id);
+          // Update local state instead of refetching
+          if (paymentLinkData?.paymentUrl) {
+            setInvoice(prev => prev ? { 
+              ...prev, 
+              stripe_payment_link: paymentLinkData.paymentUrl,
+              stripe_payment_link_id: paymentLinkData.paymentLinkId
+            } : null);
+          } else {
+            await fetchInvoiceData(false); // Only refetch if payment link not in response
+          }
         } catch (error) {
           message.error('Neizdevās izveidot maksājuma saiti');
           setPreparingToSend(false);
@@ -469,25 +538,15 @@ const ViewInvoice = () => {
           }
         }
         
-        // ALWAYS update status to 'sent' after successful copy
-        const sentAt = new Date().toISOString();
-        const { error: updateError } = await supabase
-          .from('invoices')
-          .update({ 
-            status: 'sent',
-            sent_at: sentAt
-          })
-          .eq('id', invoice.id);
-        
-        if (!updateError) {
-          // Update local state
-          setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
-        }
+        // DO NOT update status or sent_at when copying link
+        // Status and sent_at should ONLY be set when email is actually sent
+        // Copying link doesn't mean customer was notified
         
         setLinkCopied(true);
-        // Mark customer as notified
-        setCustomerNotified(true);
-        message.success('Saite nokopēta starpliktuvē! Rēķina statuss ir atjaunināts uz "Nosūtīts".');
+        // DO NOT mark customer as notified - they haven't received email
+        // setCustomerNotified(true); // REMOVED - only set when email is sent
+        
+        message.success('Saite nokopēta starpliktuvē!');
         
         // Close modal after successful copy
         setTimeout(() => {
@@ -515,8 +574,8 @@ const ViewInvoice = () => {
   };
 
   const handleReadyToSend = async () => {
-    // This is called when user clicks "Gatavs nosūtīšanai" on a draft invoice
-    // It immediately updates status to 'sent' in database, then opens the share modal
+    // This is called when user clicks "Gatavs rēķins" on a draft invoice
+    // It will send the invoice email directly and change status to 'sent'
     // Note: public_token is already generated when invoice is created
     
     // If we're in edit mode, save changes first
@@ -582,7 +641,7 @@ const ViewInvoice = () => {
 
         // Exit edit mode and reload data
         setIsEditing(false);
-        await fetchInvoiceData();
+        await fetchInvoiceData(false); // Reload without loading spinner
         setPreparingToSend(false);
       } catch (saveError) {
         if (saveError.errorFields) {
@@ -624,67 +683,193 @@ const ViewInvoice = () => {
         message.error('Neizdevās sagatavot rēķinu');
         return;
       }
-      // Refresh invoice data
-      await fetchInvoiceData();
+      // Refresh invoice data without loading spinner
+      await fetchInvoiceData(false);
     }
 
-    // Open the modal FIRST for immediate user feedback
-    // Reset notification tracking when opening modal (customer not notified yet)
-    setCustomerNotified(false);
-    setShareMethodModal(true);
-    message.success('Rēķina statuss nomainīts uz Nosūtīts');
-    
-    // Then update status and create payment link in the background (non-blocking)
-    (async () => {
-      try {
-        const sentAt = new Date().toISOString();
-        const { error: statusUpdateError } = await supabase
-          .from('invoices')
-          .update({ 
-            status: 'sent',
-            sent_at: sentAt
-          })
-          .eq('id', invoice.id);
-        
-        if (statusUpdateError) {
-          message.error('Neizdevās atjaunināt rēķina statusu');
-          return;
-        }
-        
-        // Update local state
-        setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
-        
-        // Create Stripe payment link in the background (don't set preparingToSend - that's only for email sending)
-        if (!invoice.stripe_payment_link) {
-          try {
-            const paymentLinkData = await stripeService.createPaymentLink(invoice.id);
-            
-            // Update local state immediately with the payment link from the response
-            if (paymentLinkData?.paymentUrl) {
-              setInvoice(prev => prev ? { 
-                ...prev, 
-                stripe_payment_link: paymentLinkData.paymentUrl,
-                stripe_payment_link_id: paymentLinkData.paymentLinkId
-              } : null);
-            } else {
-              // If response doesn't have paymentUrl, refresh from database
-              // The edge function should have saved it to the database
-              await fetchInvoiceData();
-            }
-          } catch (error) {
-            // Don't show error message to user - payment link creation happens in background
-            // Try to refresh from database in case it was saved
-            try {
-              await fetchInvoiceData();
-            } catch (fetchError) {
-              // Error fetching invoice data
+    // Ensure customer email exists
+    if (!invoice.customer_email) {
+      message.error('Lūdzu, norādiet klienta e-pasta adresi pirms nosūtīšanas');
+      return;
+    }
+
+    // Ensure Stripe payment link exists before sending email
+    try {
+      setPreparingToSend(true);
+      
+      let currentInvoice = invoice;
+      if (!currentInvoice.stripe_payment_link) {
+        try {
+          const paymentLinkData = await stripeService.createPaymentLink(currentInvoice.id);
+          
+          // Update local state immediately with the payment link from the response
+          if (paymentLinkData?.paymentUrl) {
+            currentInvoice = { 
+              ...currentInvoice, 
+              stripe_payment_link: paymentLinkData.paymentUrl,
+              stripe_payment_link_id: paymentLinkData.paymentLinkId
+            };
+            setInvoice(currentInvoice);
+          } else {
+            // If response doesn't have paymentUrl, refresh from database
+            await fetchInvoiceData(false);
+            const { data: freshInvoice } = await supabase
+              .from('invoices')
+              .select('*')
+              .eq('id', invoice.id)
+              .single();
+            if (freshInvoice) {
+              currentInvoice = freshInvoice;
+              setInvoice(freshInvoice);
             }
           }
+        } catch (error) {
+          message.error('Neizdevās izveidot maksājuma saiti. Rēķins netika nosūtīts.');
+          setPreparingToSend(false);
+          return;
         }
-      } catch (error) {
-        // Don't show error - status update happens in background
       }
-    })();
+
+      setPreparingToSend(false);
+
+      // Now send the email using the same logic as handleSendEmail
+      await handleSendEmailDirect(currentInvoice);
+    } catch (error) {
+      console.error('Error preparing invoice to send:', error);
+      message.error('Neizdevās sagatavot rēķinu nosūtīšanai');
+      setPreparingToSend(false);
+    }
+  };
+
+  // New function to send email directly (extracted from handleSendEmail for reuse)
+  const handleSendEmailDirect = async (invoiceToSend) => {
+    if (!invoiceToSend?.public_token || !invoiceToSend?.customer_email) {
+      message.error('Nav iespējams nosūtīt e-pastu');
+      return;
+    }
+
+    try {
+      setSendingEmail(true);
+      
+      // Get current session for authentication
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error('Nav autentificēts. Lūdzu, pieslēdzieties atkārtoti.');
+      }
+      
+      // Call Supabase Edge Function to send email
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, ''); // Remove trailing slash
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/send-invoice-email`;
+      
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          invoiceId: invoiceToSend.id,
+          customerEmail: invoiceToSend.customer_email,
+          customerName: invoiceToSend.customer_name,
+          invoiceNumber: invoiceToSend.invoice_number,
+          publicToken: invoiceToSend.public_token,
+          total: invoiceToSend.total
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        // Handle 429 (Too Many Requests) with cooldown message
+        if (response.status === 429) {
+          // Set cooldown from backend response
+          if (errorData.cooldownRemaining) {
+            setCooldownRemaining(errorData.cooldownRemaining);
+          }
+          // Also refresh invoice to get latest last_invoice_email_sent
+          await fetchInvoiceData(false);
+          const cooldownError = new Error(errorData.message || errorData.error || 'Cooldown active');
+          cooldownError.status = 429;
+          cooldownError.cooldownRemaining = errorData.cooldownRemaining;
+          throw cooldownError;
+        }
+        throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Update invoice status to 'sent' and set sent_at (only when email is successfully sent)
+      const sentAt = new Date().toISOString();
+      const oldStatus = invoiceToSend.status;
+      const { error: updateError } = await supabase
+        .from('invoices')
+        .update({ 
+          status: 'sent',
+          sent_at: sentAt
+        })
+        .eq('id', invoiceToSend.id);
+      
+      if (!updateError) {
+        // Fetch fresh invoice data to get last_invoice_email_sent for cooldown
+        const { data: updatedInvoice } = await supabase
+          .from('invoices')
+          .select('*, last_invoice_email_sent')
+          .eq('id', invoiceToSend.id)
+          .single();
+        
+        if (updatedInvoice) {
+          setInvoice(updatedInvoice);
+          
+          // Start cooldown timer (10 minutes = 600 seconds)
+          setCooldownRemaining(600);
+        } else {
+          // Fallback to local state update if fetch fails
+          setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
+          // Start cooldown timer anyway
+          setCooldownRemaining(600);
+        }
+        
+        // Log invoice sent (first time) or resent
+        const isOwnInvoice = invoiceToSend.user_id === userProfile?.id;
+        const actionType = oldStatus === 'sent' ? ActionTypes.INVOICE_RESENT : ActionTypes.INVOICE_SENT;
+        const description = oldStatus === 'sent' 
+          ? `Nosūtīts rēķins ${invoiceToSend.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`
+          : `Nosūtīts rēķins ${invoiceToSend.invoice_number} klientam${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`;
+        
+        await logInvoiceAction(
+          actionType,
+          description,
+          {
+            invoice_number: invoiceToSend.invoice_number,
+            customer_name: invoiceToSend.customer_name,
+            customer_email: invoiceToSend.customer_email,
+            total_amount: parseFloat(invoiceToSend.total || 0),
+            is_own_invoice: isOwnInvoice,
+            is_other_user_invoice: !isOwnInvoice,
+            creator_username: invoiceToSend.creator?.username || 'Nezināms',
+            sent_by: userProfile?.username || 'Nezināms',
+          },
+          invoiceToSend.id
+        );
+        
+        message.success(`E-pasts veiksmīgi nosūtīts uz ${invoiceToSend.customer_email}!`);
+      } else {
+        console.error('Failed to update invoice status:', updateError);
+        message.warning('E-pasts nosūtīts, bet neizdevās atjaunināt rēķina statusu');
+      }
+    } catch (error) {
+      console.error('Send email error:', error);
+      
+      if (error?.status === 429) {
+        const minutes = Math.ceil((error.cooldownRemaining || 600) / 60);
+        message.warning(`Lūdzu, uzgaidiet ${minutes} minūte(s) pirms nākamās nosūtīšanas`);
+      } else {
+        message.error(error?.message || 'Neizdevās nosūtīt e-pastu');
+      }
+    } finally {
+      setSendingEmail(false);
+    }
   };
 
   // Removed handleShareMethod - now handled directly in modal buttons
@@ -694,20 +879,21 @@ const ViewInvoice = () => {
       message.error('Nav iespējams nosūtīt e-pastu');
       return;
     }
+    
+    // Only allow sending if status is 'draft' or 'sent' (for resend)
+    if (invoice?.status !== 'draft' && invoice?.status !== 'sent') {
+      message.error('Rēķins jābūt melnraksts vai jau nosūtīts');
+      return;
+    }
 
-    // Check cooldown (10 minutes = 600000ms)
-    const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
-    if (lastEmailSent) {
-      const timeSinceLastEmail = Date.now() - lastEmailSent;
-      if (timeSinceLastEmail < COOLDOWN_MS) {
-        const remainingSeconds = Math.ceil((COOLDOWN_MS - timeSinceLastEmail) / 1000);
-        const remainingMinutes = Math.floor(remainingSeconds / 60);
-        const remainingSecs = remainingSeconds % 60;
-        message.warning(
-          `Lūdzu, uzgaidiet pirms nākamās nosūtīšanas. Atlikušas ${remainingMinutes} min ${remainingSecs} sek.`
-        );
-        return;
-      }
+    // Check cooldown - button should be disabled, but double-check here too
+    if (cooldownRemaining > 0) {
+      const remainingMinutes = Math.floor(cooldownRemaining / 60);
+      const remainingSecs = cooldownRemaining % 60;
+      message.warning(
+        `Lūdzu, uzgaidiet pirms nākamās nosūtīšanas. Atlikušas ${remainingMinutes} min ${remainingSecs} sek.`
+      );
+      return;
     }
 
     try {
@@ -717,8 +903,17 @@ const ViewInvoice = () => {
       if (!invoice.stripe_payment_link) {
         try {
           setPreparingToSend(true);
-          await stripeService.createPaymentLink(invoice.id);
-          await fetchInvoiceData(); // Refresh invoice data to get the payment link
+          const paymentLinkData = await stripeService.createPaymentLink(invoice.id);
+          // Update local state instead of refetching
+          if (paymentLinkData?.paymentUrl) {
+            setInvoice(prev => prev ? { 
+              ...prev, 
+              stripe_payment_link: paymentLinkData.paymentUrl,
+              stripe_payment_link_id: paymentLinkData.paymentLinkId
+            } : null);
+          } else {
+            await fetchInvoiceData(false); // Only refetch if payment link not in response
+          }
           setPreparingToSend(false);
         } catch (error) {
           message.error('Neizdevās izveidot maksājuma saiti. Rēķins netika nosūtīts.');
@@ -728,10 +923,10 @@ const ViewInvoice = () => {
         }
       }
       
-      // Get fresh invoice data after payment link creation
+      // Get fresh invoice data after payment link creation (include last_invoice_email_sent for cooldown)
       const { data: freshInvoice } = await supabase
         .from('invoices')
-        .select('*')
+        .select('*, last_invoice_email_sent')
         .eq('id', invoice.id)
         .single();
       
@@ -771,6 +966,12 @@ const ViewInvoice = () => {
         const errorData = await response.json().catch(() => ({}));
         // Handle 429 (Too Many Requests) with cooldown message
         if (response.status === 429) {
+          // Set cooldown from backend response
+          if (errorData.cooldownRemaining) {
+            setCooldownRemaining(errorData.cooldownRemaining);
+          }
+          // Also refresh invoice to get latest last_invoice_email_sent
+          await fetchInvoiceData(false);
           const cooldownError = new Error(errorData.message || errorData.error || 'Cooldown active');
           cooldownError.status = 429;
           cooldownError.cooldownRemaining = errorData.cooldownRemaining;
@@ -781,7 +982,8 @@ const ViewInvoice = () => {
 
       const data = await response.json();
 
-      // ALWAYS update status to 'sent' unconditionally (regardless of email success)
+      // Update invoice status to 'sent' and set sent_at (only when email is successfully sent)
+      // This works for both 'draft' -> 'sent' (first time) and 'sent' -> 'sent' (resend)
       const sentAt = new Date().toISOString();
       const oldStatus = invoice.status;
       const { error: updateError } = await supabase
@@ -793,8 +995,24 @@ const ViewInvoice = () => {
         .eq('id', invoice.id);
       
       if (!updateError) {
-        // Update local state instead of fetching to prevent modal flicker
-        setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
+        // Fetch fresh invoice data to get last_invoice_email_sent for cooldown
+        const { data: updatedInvoice } = await supabase
+          .from('invoices')
+          .select('*, last_invoice_email_sent')
+          .eq('id', invoice.id)
+          .single();
+        
+        if (updatedInvoice) {
+          setInvoice(updatedInvoice);
+          
+          // Start cooldown timer (10 minutes = 600 seconds)
+          setCooldownRemaining(600);
+        } else {
+          // Fallback to local state update if fetch fails
+          setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
+          // Start cooldown timer anyway
+          setCooldownRemaining(600);
+        }
         
         // Log invoice sent (first time) or resent
         const isOwnInvoice = invoice.user_id === userProfile?.id;
@@ -844,45 +1062,9 @@ const ViewInvoice = () => {
         message.error('Neizdevās nosūtīt e-pastu');
       }
       
-      // Still update status to 'sent' even if email fails
-      try {
-        const sentAt = new Date().toISOString();
-        const { error: updateError } = await supabase
-          .from('invoices')
-          .update({ 
-            status: 'sent',
-            sent_at: sentAt
-          })
-          .eq('id', invoice.id);
-        
-        if (!updateError) {
-          // Update local state instead of fetching to prevent modal flicker
-          setInvoice(prev => prev ? { ...prev, status: 'sent', sent_at: sentAt } : null);
-          
-          // Log invoice sent even if email failed
-          const isOwnInvoice = invoice.user_id === userProfile?.id;
-          await logInvoiceAction(
-            ActionTypes.INVOICE_SENT,
-            `Nosūtīts rēķins ${invoice.invoice_number} klientam (e-pasts var nebūt nosūtīts)${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`,
-            {
-              invoice_number: invoice.invoice_number,
-              old_invoice_status: invoice.status,
-              new_invoice_status: 'sent',
-              customer_name: invoice.customer_name,
-              customer_email: invoice.customer_email,
-              total_amount: parseFloat(invoice.total || 0),
-              is_own_invoice: isOwnInvoice,
-              is_other_user_invoice: !isOwnInvoice,
-              creator_username: invoice.creator?.username || 'Nezināms',
-              sent_by: userProfile?.username || 'Nezināms',
-              email_send_failed: true,
-            },
-            invoice.id
-          );
-        }
-      } catch (statusError) {
-        // Error updating status after email failure
-      }
+      // DO NOT update status or sent_at if email fails
+      // sent_at should ONLY be set when email is successfully sent
+      // Status can remain as 'draft' until email is actually sent
     } finally {
       setSendingEmail(false);
     }
@@ -1080,20 +1262,45 @@ const ViewInvoice = () => {
               </div>
             </div>
             <Space>
-              {/* Show "Ready to Send" button for draft invoices when not editing (creator, super_admin, or admin for employee invoices) */}
+              {/* Show "Gatavs rēķins" button for draft invoices when not editing (creator, super_admin, or admin for employee invoices) */}
               {invoice?.status === 'draft' && !isEditing && (invoice?.user_id === userProfile?.id || isSuperAdmin || canEditAsAdmin) && (
-                <Button 
-                  type="primary"
-                  icon={<SendOutlined />} 
-                  onClick={handleReadyToSend}
-                  loading={preparingToSend}
-                  style={{
-                    background: '#10b981',
-                    borderColor: '#10b981',
+                <Popconfirm
+                  title="Nosūtīt rēķinu klientam?"
+                  description={
+                    <div>
+                      <p style={{ marginBottom: '8px' }}>
+                        Rēķins tiks nosūtīts uz <strong>{invoice?.customer_email}</strong> un statuss mainīsies uz "Nosūtīts".
+                      </p>
+                      <p style={{ 
+                        marginTop: '8px', 
+                        fontSize: '13px', 
+                        color: '#6b7280',
+                        lineHeight: 1.5
+                      }}>
+                        Pirms nosūtīšanas tiks izveidota maksājuma saite un publiskā saite, lai klients varētu apskatīt un apmaksāt rēķinu.
+                      </p>
+                    </div>
+                  }
+                  onConfirm={handleReadyToSend}
+                  okText="Nosūtīt"
+                  cancelText="Atcelt"
+                  okButtonProps={{ 
+                    style: { background: '#10b981', borderColor: '#10b981' },
+                    loading: preparingToSend || sendingEmail
                   }}
                 >
-                  Gatavs nosūtīšanai
-                </Button>
+                  <Button 
+                    type="primary"
+                    icon={<CheckCircleOutlined />} 
+                    loading={preparingToSend || sendingEmail}
+                    style={{
+                      background: '#10b981',
+                      borderColor: '#10b981',
+                    }}
+                  >
+                    Gatavs rēķins
+                  </Button>
+                </Popconfirm>
               )}
               
               {/* Show "Preview" button - always available since public_token is generated on creation */}
@@ -1121,7 +1328,11 @@ const ViewInvoice = () => {
               {invoice?.status !== 'draft' && (
                 <Button 
                   icon={<LinkOutlined />} 
-                  onClick={() => setShareMethodModal(true)}
+                  onClick={async () => {
+                    // Refresh invoice data to get latest cooldown info
+                    await fetchInvoiceData(false);
+                    setShareMethodModal(true);
+                  }}
                 >
                   Dalīties
                 </Button>
@@ -1164,6 +1375,18 @@ const ViewInvoice = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Customer Notification Warning */}
+              {!invoice?.sent_at && invoice?.status !== 'draft' && (
+                <Alert
+                  message="Klients nav informēts"
+                  description="Šis rēķins nav nosūtīts klientam. Automātiskie atgādinājuma e-pasti nedarbosies, līdz rēķins tiks nosūtīts vai atzīmēts kā 'nosūtīts klientam'."
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 24, fontSize: '13px' }}
+                  icon={<WarningOutlined />}
+                />
+              )}
 
               <Divider />
 
@@ -1335,16 +1558,20 @@ const ViewInvoice = () => {
                                   >
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                       {imageUrl && (
-                                        <img 
-                                          src={imageUrl} 
+                                        <img
+                                          src={imageUrl}
                                           alt={title}
                                           style={{ 
-                                            width: 40, 
-                                            height: 40, 
+                                            width: 40,
+                                            height: 40,
                                             objectFit: 'cover', 
                                             borderRadius: 4,
-                                            border: '1px solid #e5e7eb'
-                                          }} 
+                                            border: '1px solid #e5e7eb',
+                                            flexShrink: 0
+                                          }}
+                                          onError={(e) => {
+                                            e.target.style.display = 'none';
+                                          }}
                                         />
                                       )}
                                       <div style={{ flex: 1 }}>
@@ -1361,7 +1588,26 @@ const ViewInvoice = () => {
                               })}
                             </Select>
                           ) : (
-                            <div style={{ color: '#111827', fontWeight: 500 }}>{item.name}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                              {item.imageUrl && (
+                                <img
+                                  src={item.imageUrl}
+                                  alt={item.name}
+                                  style={{ 
+                                    width: 48,
+                                    height: 48,
+                                    objectFit: 'cover', 
+                                    borderRadius: 6,
+                                    border: '1px solid #e5e7eb',
+                                    flexShrink: 0
+                                  }}
+                                  onError={(e) => {
+                                    e.target.style.display = 'none';
+                                  }}
+                                />
+                              )}
+                              <div style={{ color: '#111827', fontWeight: 500 }}>{item.name}</div>
+                            </div>
                           )}
                         </td>
                         <td style={{ padding: 12 }}>
@@ -1516,13 +1762,13 @@ const ViewInvoice = () => {
         open={shareMethodModal}
         onCancel={() => {
           if (!sendingEmail && !preparingToSend) {
-            // Check if status is 'sent' but customer was not notified
-            // Status is now 'sent' immediately when "Gatavs nosūtīšanai" is clicked
-            if (!customerNotified && invoice?.status === 'sent') {
+            // Check if customer was not notified and status is NOT 'sent'
+            // If status is already 'sent', don't show warning (invoice was already sent before)
+            if (!customerNotified && invoice?.status !== 'sent') {
               // Show warning modal instead of closing
               setWarningModalVisible(true);
             } else {
-              // Safe to close - customer was notified or invoice is still draft
+              // Safe to close - customer was notified or invoice status is 'sent' (already sent before)
               setShareMethodModal(false);
               setCustomerNotified(false);
             }
@@ -1637,61 +1883,89 @@ const ViewInvoice = () => {
                 />
               </label>
               <div style={{ width: '100%' }} className="sm:w-auto">
-                <Popconfirm
-                  title="Nosūtīt e-pastu?"
-                  description={
-                    <div>
-                      <p>Vai tiešām vēlaties nosūtīt rēķinu uz {invoice?.customer_email}?</p>
-                      <p style={{ 
-                        marginTop: '8px', 
-                        fontSize: '13px', 
-                        color: '#6b7280',
-                        lineHeight: 1.5
-                      }}>
-                        Lūdzu, ņemiet vērā, ka e-pastu var nosūtīt tikai reizi 5 minūtēs, lai novērstu pārāk biežu nosūtīšanu.
-                      </p>
-                    </div>
-                  }
-                  onConfirm={async (e) => {
-                    e?.stopPropagation?.();
-                    e?.preventDefault?.();
-                    // Payment link will be created automatically in handleSendEmail
-                    // Send email (this will update status to 'sent' and keep modal open)
-                    await handleSendEmail();
-                    // Modal stays open - don't close it
-                  }}
-                  onOpenChange={(open) => {
-                    // Prevent Popconfirm from affecting modal state
-                    if (!open && sendingEmail) {
-                      return false;
-                    }
-                  }}
-                  okText="Nosūtīt"
-                  cancelText="Atcelt"
-                  okButtonProps={{
-                    style: { background: '#137fec', borderColor: '#137fec' }
-                  }}
-                >
+                {cooldownRemaining > 0 ? (
                   <Button
                     type="primary"
-                    loading={preparingToSend || sendingEmail}
+                    disabled
                     className="share-modal-button"
                     style={{
                       height: '48px',
                       minWidth: '84px',
                       width: '100%',
                       borderRadius: '8px',
-                      background: '#137fec',
+                      background: '#9ca3af',
                       border: 'none',
                       fontSize: '16px',
                       fontWeight: 700,
                       letterSpacing: '0.015em',
-                      padding: '0 20px'
+                      padding: '0 20px',
+                      cursor: 'not-allowed'
                     }}
                   >
-                    Nosūtīt e-pastu
+                    {(() => {
+                      const minutes = Math.floor(cooldownRemaining / 60);
+                      const seconds = cooldownRemaining % 60;
+                      return `Atlikušas ${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    })()}
                   </Button>
-                </Popconfirm>
+                ) : (
+                  <Popconfirm
+                    title="Nosūtīt e-pastu?"
+                    description={
+                      <div>
+                        <p>Vai tiešām vēlaties nosūtīt rēķinu uz {invoice?.customer_email}?</p>
+                        <p style={{ 
+                          marginTop: '8px', 
+                          fontSize: '13px', 
+                          color: '#6b7280',
+                          lineHeight: 1.5
+                        }}>
+                          Lūdzu, ņemiet vērā, ka e-pastu var nosūtīt tikai reizi 10 minūtēs, lai novērstu pārāk biežu nosūtīšanu.
+                        </p>
+                      </div>
+                    }
+                    onConfirm={async (e) => {
+                      e?.stopPropagation?.();
+                      e?.preventDefault?.();
+                      // Payment link will be created automatically in handleSendEmail
+                      // Send email (this will update status to 'sent' and keep modal open)
+                      await handleSendEmail();
+                      // Modal stays open - don't close it
+                    }}
+                    onOpenChange={(open) => {
+                      // Prevent Popconfirm from affecting modal state
+                      if (!open && sendingEmail) {
+                        return false;
+                      }
+                    }}
+                    okText="Nosūtīt"
+                    cancelText="Atcelt"
+                    okButtonProps={{
+                      style: { background: '#137fec', borderColor: '#137fec' }
+                    }}
+                  >
+                    <Button
+                      type="primary"
+                      loading={preparingToSend || sendingEmail}
+                      disabled={preparingToSend || sendingEmail || cooldownRemaining > 0}
+                      className="share-modal-button"
+                      style={{
+                        height: '48px',
+                        minWidth: '84px',
+                        width: '100%',
+                        borderRadius: '8px',
+                        background: '#137fec',
+                        border: 'none',
+                        fontSize: '16px',
+                        fontWeight: 700,
+                        letterSpacing: '0.015em',
+                        padding: '0 20px'
+                      }}
+                    >
+                      Nosūtīt e-pastu
+                    </Button>
+                  </Popconfirm>
+                )}
               </div>
             </div>
           </div>
@@ -1875,10 +2149,10 @@ const ViewInvoice = () => {
               lineHeight: 1.5,
               margin: 0
             }}>
-              Rēķina statuss ir jau mainīts uz "Nosūtīts", bet <strong style={{ 
+              Rēķins joprojām paliek <strong style={{ 
                 fontWeight: 600, 
                 color: '#1C2434' 
-              }}>klients vēl nav informēts.</strong>
+              }}>"Nen nosūtīts"</strong> un klients nav informēts.
             </p>
             <p style={{ 
               fontSize: '14px', 
@@ -1886,7 +2160,7 @@ const ViewInvoice = () => {
               lineHeight: 1.5,
               margin: 0
             }}>
-              Ja aizvērsiet šo logu bez nosūtīšanas, klients <strong style={{ fontWeight: 500 }}>nesaņems e-pastu</strong> un <strong style={{ fontWeight: 500 }}>neiegūs maksājuma saiti.</strong>
+              Ja aizvērsiet šo logu bez nosūtīšanas, klients <strong style={{ fontWeight: 500 }}>nesaņems automātiskos e-pastus</strong> un <strong style={{ fontWeight: 500 }}>neiegūs maksājuma saiti.</strong>
             </p>
             <p style={{ 
               fontSize: '14px', 
@@ -1895,7 +2169,7 @@ const ViewInvoice = () => {
               fontWeight: 500,
               margin: 0
             }}>
-              Lūdzu, nosūtiet rēķinu klientam vai kopējiet saiti pirms aizvēršanas.
+              Lūdzu, nosūtiet rēķinu klientam, lai klients saņemtu automātiskos e-pastus un maksājuma saiti.
             </p>
           </div>
 

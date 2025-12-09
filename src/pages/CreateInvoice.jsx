@@ -46,6 +46,15 @@ const CreateInvoice = ({ mode = 'create' }) => {
   const [templateName, setTemplateName] = useState('');
   const templateLoadedRef = useRef(false);
   
+  // Set document title
+  useEffect(() => {
+    if (mode === 'edit') {
+      document.title = 'Rediģēt rēķinu | Piffdeals';
+    } else {
+      document.title = 'Izveidot rēķinu | Piffdeals';
+    }
+  }, [mode]);
+  
   // Barcode scanner state
   const scannerInputRef = useRef('');
   const scannerTimeoutRef = useRef(null);
@@ -1170,6 +1179,16 @@ const CreateInvoice = ({ mode = 'create' }) => {
                   />
                 </Form.Item>
               </div>
+
+              {/* Important Notice */}
+              <Alert
+                message="Svarīgi: Automātiskie atgādinājuma e-pasti"
+                description="Automātiskie atgādinājuma e-pasti tiks nosūtīti klientiem tikai tad, ja rēķins ir nosūtīts klientam caur e-pastu vai atzīmēts kā 'nosūtīts klientam'. Ja rēķins nav nosūtīts, automātiskie atgādinājumi nedarbosies."
+                type="info"
+                showIcon
+                style={{ marginBottom: 24, fontSize: '13px' }}
+                icon={<InfoCircleOutlined />}
+              />
 
               {/* Action Buttons */}
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
