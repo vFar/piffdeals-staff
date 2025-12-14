@@ -5,6 +5,7 @@ import { ConfigProvider, App as AntdApp } from 'antd'
 import lvLV from 'antd/locale/lv_LV'
 import { AuthProvider } from './contexts/AuthContext'
 import { NotificationProvider } from './contexts/NotificationContext'
+import { InvoiceDataProvider } from './contexts/InvoiceDataContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 import App from './App.jsx'
@@ -40,13 +41,15 @@ createRoot(document.getElementById('root')).render(
     <ErrorBoundary>
       <BrowserRouter>
         <AuthProvider>
-          <NotificationProvider>
-            <ConfigProvider theme={theme} locale={lvLV}>
-              <AntdApp>
-                <App />
-              </AntdApp>
-            </ConfigProvider>
-          </NotificationProvider>
+          <InvoiceDataProvider>
+            <NotificationProvider>
+              <ConfigProvider theme={theme} locale={lvLV}>
+                <AntdApp>
+                  <App />
+                </AntdApp>
+              </ConfigProvider>
+            </NotificationProvider>
+          </InvoiceDataProvider>
         </AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>

@@ -13,7 +13,6 @@ import {
   TeamOutlined,
   FileProtectOutlined,
   HistoryOutlined,
-  MenuOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -38,6 +37,28 @@ const DashboardLayout = ({ children }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isTablet, setIsTablet] = useState(window.innerWidth >= 768 && window.innerWidth < 1024);
+  
+  // Desktop sidebar collapse state (persisted in localStorage)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sidebarCollapsed');
+      return saved === 'true';
+    } catch {
+      return false;
+    }
+  });
+  
+  // Menu open keys for nested items
+  const [openKeys, setOpenKeys] = useState(() => {
+    const path = location.pathname;
+    if (path.startsWith('/sales-charts')) {
+      return ['/sales-charts'];
+    }
+    return [];
+  });
+  
+  // Track previous path to prevent infinite loops
+  const prevPathRef = useRef(location.pathname);
   
   // Global search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -109,6 +130,24 @@ const DashboardLayout = ({ children }) => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [mobileMenuOpen]);
+
+  // Persist sidebar collapsed state
+  useEffect(() => {
+    try {
+      localStorage.setItem('sidebarCollapsed', String(sidebarCollapsed));
+    } catch (error) {
+      // Failed to save to localStorage
+    }
+  }, [sidebarCollapsed]);
+
+  // Toggle sidebar collapse
+  const toggleSidebar = () => {
+    if (isMobile || isTablet) {
+      setMobileMenuOpen(!mobileMenuOpen);
+    } else {
+      setSidebarCollapsed(!sidebarCollapsed);
+    }
+  };
 
   // Global search function - Role-based: employees see only invoices/customers, admins see everything
   const performSearch = useCallback(async (query) => {
@@ -365,6 +404,24 @@ const DashboardLayout = ({ children }) => {
         key: '/sales-charts',
         icon: <BarChartOutlined style={{ fontSize: '20px' }} />,
         label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Pārdošanas grafiki</span>,
+        children: [
+          {
+            key: '/sales-charts/overview',
+            label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Pārskats</span>,
+          },
+          {
+            key: '/sales-charts/statistics',
+            label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Statistika</span>,
+          },
+          {
+            key: '/sales-charts/sales-analytics',
+            label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Pārdošanas analītika</span>,
+          },
+          {
+            key: '/sales-charts/analytics',
+            label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Vispārējā analītika</span>,
+          },
+        ],
       },
       // Only show User Accounts to admins (uses cached value during loading for smooth UX)
       ...(shouldShowAdmin ? [{
@@ -415,9 +472,9 @@ const DashboardLayout = ({ children }) => {
       return '/profile';
     }
     
-    // For sales charts
+    // For sales charts and nested analytics
     if (path.startsWith('/sales-charts')) {
-      return '/sales-charts';
+      return path; // Return full path for nested items
     }
     
     // Default to dashboard
@@ -505,7 +562,19 @@ const DashboardLayout = ({ children }) => {
   };
 
   // Sidebar content component (reusable for desktop and mobile)
-  const SidebarContent = ({ showMobileSearch = false }) => (
+  const SidebarContent = ({ showMobileSearch = false }) => {
+    // Update openKeys when location changes (only if path actually changed)
+    useEffect(() => {
+      const currentPath = location.pathname;
+      if (currentPath !== prevPathRef.current) {
+        prevPathRef.current = currentPath;
+        if (currentPath.startsWith('/sales-charts')) {
+          setOpenKeys(prev => prev.includes('/sales-charts') ? prev : ['/sales-charts']);
+        }
+      }
+    }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Logo Section */}
       <div
@@ -899,6 +968,8 @@ const DashboardLayout = ({ children }) => {
         <Menu
           mode="inline"
           selectedKeys={[getSelectedKey()]}
+          openKeys={openKeys}
+          onOpenChange={setOpenKeys}
           items={menuItems}
           onClick={handleMenuClick}
           style={{
@@ -934,7 +1005,8 @@ const DashboardLayout = ({ children }) => {
         </Button>
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <Layout style={{ minHeight: '100vh', background: '#EBF3FF', overflow: 'visible' }}>
@@ -942,6 +1014,10 @@ const DashboardLayout = ({ children }) => {
       {!isMobile && !isTablet && (
         <Sider 
           width={256}
+          collapsed={sidebarCollapsed}
+          collapsedWidth={0}
+          collapsible={false}
+          trigger={null}
           style={{
             overflow: 'auto',
             height: '100vh',
@@ -952,6 +1028,7 @@ const DashboardLayout = ({ children }) => {
             background: '#ffffff',
             borderRight: '1px solid #e5e7eb',
             zIndex: 50,
+            transition: 'all 0.2s',
           }}
         >
           <SidebarContent />
@@ -976,7 +1053,7 @@ const DashboardLayout = ({ children }) => {
       </Drawer>
       {/* Main Layout */}
       <Layout style={{ 
-        marginLeft: (isMobile || isTablet) ? 0 : 256, 
+        marginLeft: (isMobile || isTablet) ? 0 : (sidebarCollapsed ? 0 : 256), 
         background: '#EBF3FF',
         transition: 'margin-left 0.2s',
       }}>
@@ -997,23 +1074,36 @@ const DashboardLayout = ({ children }) => {
             height: '64px',
           }}
         >
-          {/* Hamburger Menu Button - Mobile/Tablet only */}
-          {(isMobile || isTablet) && (
-            <Button
-              type="text"
-              icon={<MenuOutlined style={{ fontSize: '20px' }} />}
-              onClick={() => setMobileMenuOpen(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '40px',
-                height: '40px',
-                padding: 0,
-                flexShrink: 0,
-              }}
-            />
-          )}
+          {/* Sidebar Toggle Button - All devices */}
+          <Button
+            type="text"
+            onClick={toggleSidebar}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '40px',
+              height: '40px',
+              padding: 0,
+              flexShrink: 0,
+              color: '#6b7280',
+              border: '1px solid #e5e7eb',
+              borderRadius: '8px',
+            }}
+            aria-label="Toggle Sidebar"
+          >
+            {((isMobile || isTablet) ? mobileMenuOpen : !sidebarCollapsed) ? (
+              // X icon when sidebar is open/expanded
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            ) : (
+              // Hamburger menu icon when sidebar is closed/collapsed
+              <svg width="16" height="12" viewBox="0 0 16 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fillRule="evenodd" clipRule="evenodd" d="M0.583252 1C0.583252 0.585788 0.919038 0.25 1.33325 0.25H14.6666C15.0808 0.25 15.4166 0.585786 15.4166 1C15.4166 1.41421 15.0808 1.75 14.6666 1.75L1.33325 1.75C0.919038 1.75 0.583252 1.41422 0.583252 1ZM0.583252 11C0.583252 10.5858 0.919038 10.25 1.33325 10.25L14.6666 10.25C15.0808 10.25 15.4166 10.5858 15.4166 11C15.4166 11.4142 15.0808 11.75 14.6666 11.75L1.33325 11.75C0.919038 11.75 0.583252 11.4142 0.583252 11ZM1.33325 5.25C0.919038 5.25 0.583252 5.58579 0.583252 6C0.583252 6.41421 0.919038 6.75 1.33325 6.75L7.99992 6.75C8.41413 6.75 8.74992 6.41421 8.74992 6C8.74992 5.58579 8.41413 5.25 7.99992 5.25L1.33325 5.25Z" fill="currentColor"/>
+              </svg>
+            )}
+          </Button>
 
           {/* Search Bar with Results Dropdown - Hidden on mobile/tablet */}
           {!isMobile && !isTablet && (
@@ -1490,6 +1580,37 @@ const DashboardLayout = ({ children }) => {
 
         .custom-menu .ant-menu-item::after {
           display: none;
+        }
+
+        .custom-menu .ant-menu-submenu-title {
+          height: 40px;
+          line-height: 40px;
+          border-radius: 8px;
+          margin-bottom: 8px;
+          color: #4b5563;
+          transition: all 0.2s;
+        }
+
+        .custom-menu .ant-menu-submenu-title:hover {
+          background: #f3f4f6 !important;
+          color: #4b5563;
+        }
+
+        .custom-menu .ant-menu-submenu-open > .ant-menu-submenu-title,
+        .custom-menu .ant-menu-submenu-selected > .ant-menu-submenu-title {
+          background: rgba(0, 104, 255, 0.1) !important;
+          color: #0068FF !important;
+        }
+
+        .custom-menu .ant-menu-submenu-open > .ant-menu-submenu-title .ant-menu-item-icon,
+        .custom-menu .ant-menu-submenu-selected > .ant-menu-submenu-title .ant-menu-item-icon {
+          color: #0068FF !important;
+        }
+
+        .custom-menu .ant-menu-sub .ant-menu-item {
+          height: 36px;
+          line-height: 36px;
+          padding-left: 48px !important;
         }
 
         .user-dropdown-trigger:hover {

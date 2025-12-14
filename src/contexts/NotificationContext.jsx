@@ -48,17 +48,83 @@ export const NOTIFICATION_PRIORITY = {
   INFO: 'info',
 };
 
+// Helper functions for localStorage persistence
+const getStorageKey = (userId) => `notifications_${userId}`;
+const getDeletedKeysKey = (userId) => `deleted_notification_keys_${userId}`;
+const getLastDigestKey = (userId) => `last_daily_digest_${userId}`;
+
+const loadNotifications = (userId) => {
+  try {
+    const stored = localStorage.getItem(getStorageKey(userId));
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveNotifications = (userId, notifications) => {
+  try {
+    localStorage.setItem(getStorageKey(userId), JSON.stringify(notifications));
+  } catch (error) {
+    console.error('Failed to save notifications:', error);
+  }
+};
+
+const loadDeletedKeys = (userId) => {
+  try {
+    const stored = localStorage.getItem(getDeletedKeysKey(userId));
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+const saveDeletedKeys = (userId, deletedKeys) => {
+  try {
+    localStorage.setItem(getDeletedKeysKey(userId), JSON.stringify(Array.from(deletedKeys)));
+  } catch (error) {
+    console.error('Failed to save deleted keys:', error);
+  }
+};
+
+// Generate a unique key for daily digest notifications based on type, date, and metadata
+const generateNotificationKey = (type, metadata = {}) => {
+  const today = new Date().toDateString();
+  // For daily digest notifications, use type + date + relevant metadata
+  if (type === NOTIFICATION_TYPES.OVERDUE_INVOICES || 
+      type === NOTIFICATION_TYPES.PENDING_INVESTIGATION || 
+      type === NOTIFICATION_TYPES.DRAFT_DELETION_WARNING) {
+    // Use count and user-specific info to create unique key
+    const metaString = JSON.stringify({ 
+      count: metadata.count, 
+      isOwn: metadata.invoices?.[0]?.user_id || null,
+      date: today 
+    });
+    return `${type}_${today}_${metaString}`;
+  }
+  // For real-time notifications, use type + invoice ID + timestamp (they're unique anyway)
+  return `${type}_${metadata.invoiceId || ''}_${Date.now()}`;
+};
+
 export const NotificationProvider = ({ children }) => {
   const { currentUser } = useAuth();
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [lastDailyDigest, setLastDailyDigest] = useState(null);
+  const [deletedNotificationKeys, setDeletedNotificationKeys] = useState(new Set());
+  
+  // Helper to recalculate unread count from notifications
+  const recalculateUnreadCount = useCallback((notificationsList) => {
+    return notificationsList.filter(n => !n.read).length;
+  }, []);
 
   /**
    * Add a notification to the list
    */
-  const addNotification = useCallback((notificationData) => {
+  const addNotification = useCallback((notificationData, notificationKey = null) => {
+    if (!currentUser?.id) return null;
+
     const {
       type,
       priority = NOTIFICATION_PRIORITY.INFO,
@@ -71,23 +137,47 @@ export const NotificationProvider = ({ children }) => {
       metadata = {},
     } = notificationData;
 
-    const newNotification = {
-      id: `${Date.now()}-${Math.random()}`,
-      type,
-      priority,
-      title,
-      message,
-      description,
-      invoiceId,
-      invoiceNumber,
-      actionUrl,
-      metadata,
-      timestamp: new Date().toISOString(),
-      read: false,
-    };
+    // Generate notification key if not provided
+    const key = notificationKey || generateNotificationKey(type, metadata);
+    
+    // Check if this notification was deleted
+    if (deletedNotificationKeys.has(key)) {
+      return null;
+    }
 
-    setNotifications((prev) => [newNotification, ...prev].slice(0, 50)); // Keep last 50
-    setUnreadCount((prev) => prev + 1);
+    // Check if notification with same key already exists (for daily digest)
+    setNotifications((prev) => {
+      const existingIndex = prev.findIndex(n => n.notificationKey === key);
+      if (existingIndex !== -1) {
+        // Notification already exists, don't add duplicate
+        return prev;
+      }
+
+      const newNotification = {
+        id: `${Date.now()}-${Math.random()}`,
+        notificationKey: key, // Store the key for tracking
+        type,
+        priority,
+        title,
+        message,
+        description,
+        invoiceId,
+        invoiceNumber,
+        actionUrl,
+        metadata,
+        timestamp: new Date().toISOString(),
+        read: false,
+      };
+
+      const updated = [newNotification, ...prev].slice(0, 50); // Keep last 50
+      saveNotifications(currentUser.id, updated);
+      
+      // Recalculate unread count from the updated list
+      const newUnreadCount = recalculateUnreadCount(updated);
+      setUnreadCount(newUnreadCount);
+      
+      return updated;
+    });
 
     // Show Ant Design notification
     const notificationConfig = {
@@ -111,49 +201,93 @@ export const NotificationProvider = ({ children }) => {
         notification.info(notificationConfig);
     }
 
-    return newNotification.id;
-  }, []);
+    // Return notification key instead of id for tracking
+    return key;
+  }, [currentUser, deletedNotificationKeys, recalculateUnreadCount]);
 
   /**
    * Mark notification as read
    */
   const markAsRead = useCallback((notificationId) => {
-    setNotifications((prev) =>
-      prev.map((notif) =>
+    if (!currentUser?.id) return;
+    
+    setNotifications((prev) => {
+      const updated = prev.map((notif) =>
         notif.id === notificationId ? { ...notif, read: true } : notif
-      )
-    );
-    setUnreadCount((prev) => Math.max(0, prev - 1));
-  }, []);
+      );
+      saveNotifications(currentUser.id, updated);
+      
+      // Recalculate unread count
+      const newUnreadCount = recalculateUnreadCount(updated);
+      setUnreadCount(newUnreadCount);
+      
+      return updated;
+    });
+  }, [currentUser, recalculateUnreadCount]);
 
   /**
    * Mark all notifications as read
    */
   const markAllAsRead = useCallback(() => {
-    setNotifications((prev) => prev.map((notif) => ({ ...notif, read: true })));
-    setUnreadCount(0);
-  }, []);
+    if (!currentUser?.id) return;
+    
+    setNotifications((prev) => {
+      const updated = prev.map((notif) => ({ ...notif, read: true }));
+      saveNotifications(currentUser.id, updated);
+      setUnreadCount(0);
+      return updated;
+    });
+  }, [currentUser]);
 
   /**
    * Clear all notifications
    */
   const clearAll = useCallback(() => {
-    setNotifications([]);
+    if (!currentUser?.id) return;
+    
+    // Mark all notification keys as deleted to prevent regeneration
+    setNotifications((prev) => {
+      const newDeletedKeys = new Set(deletedNotificationKeys);
+      prev.forEach(notif => {
+        if (notif.notificationKey) {
+          newDeletedKeys.add(notif.notificationKey);
+        }
+      });
+      setDeletedNotificationKeys(newDeletedKeys);
+      saveDeletedKeys(currentUser.id, newDeletedKeys);
+      return [];
+    });
     setUnreadCount(0);
-  }, []);
+    saveNotifications(currentUser.id, []);
+  }, [currentUser, deletedNotificationKeys]);
 
   /**
    * Remove a notification
    */
   const removeNotification = useCallback((notificationId) => {
+    if (!currentUser?.id) return;
+    
     setNotifications((prev) => {
       const notification = prev.find((n) => n.id === notificationId);
-      if (notification && !notification.read) {
-        setUnreadCount((prev) => Math.max(0, prev - 1));
+      
+      // Mark notification key as deleted if it's a daily digest notification
+      if (notification?.notificationKey) {
+        const newDeletedKeys = new Set(deletedNotificationKeys);
+        newDeletedKeys.add(notification.notificationKey);
+        setDeletedNotificationKeys(newDeletedKeys);
+        saveDeletedKeys(currentUser.id, newDeletedKeys);
       }
-      return prev.filter((n) => n.id !== notificationId);
+      
+      const updated = prev.filter((n) => n.id !== notificationId);
+      saveNotifications(currentUser.id, updated);
+      
+      // Recalculate unread count
+      const newUnreadCount = recalculateUnreadCount(updated);
+      setUnreadCount(newUnreadCount);
+      
+      return updated;
     });
-  }, []);
+  }, [currentUser, deletedNotificationKeys, recalculateUnreadCount]);
 
   /**
    * Helper: Notify invoice paid
@@ -226,7 +360,22 @@ export const NotificationProvider = ({ children }) => {
     if (!userProfile) return;
 
     const today = new Date().toDateString();
-    if (lastDailyDigest === today) return; // Already sent today
+    
+    // Check localStorage for last digest if state is not set
+    let lastDigest = lastDailyDigest;
+    if (!lastDigest && userProfile?.id) {
+      try {
+        const stored = localStorage.getItem(getLastDigestKey(userProfile.id));
+        if (stored) {
+          lastDigest = stored;
+          setLastDailyDigest(stored);
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    
+    if (lastDigest === today) return; // Already sent today
 
     const userId = userProfile.id;
     const userIsAdmin = isAdmin || isSuperAdmin;
@@ -257,25 +406,33 @@ export const NotificationProvider = ({ children }) => {
         const othersOverdue = overdueInvoices.filter((inv) => inv.user_id !== userId);
 
         if (ownOverdue.length > 0) {
+          const key = generateNotificationKey(NOTIFICATION_TYPES.OVERDUE_INVOICES, { 
+            count: ownOverdue.length, 
+            invoices: ownOverdue 
+          });
           addNotification({
             type: NOTIFICATION_TYPES.OVERDUE_INVOICES,
             priority: NOTIFICATION_PRIORITY.WARNING,
             title: 'Kavēti rēķini',
-            message: `Jums ir ${ownOverdue.length} kavēts${ownOverdue.length > 1 ? 'i' : ''} rēķins${ownOverdue.length > 1 ? 'i' : ''}.`,
+            message: `Jums ir ${ownOverdue.length} ${ownOverdue.length > 1 ? 'kavēti rēķini' : 'kavēts rēķins'}.`,
             actionUrl: '/invoices?status=overdue',
             metadata: { count: ownOverdue.length, invoices: ownOverdue },
-          });
+          }, key);
         }
 
         if (userIsAdmin && othersOverdue.length > 0) {
+          const key = generateNotificationKey(NOTIFICATION_TYPES.OVERDUE_INVOICES, { 
+            count: othersOverdue.length, 
+            invoices: othersOverdue 
+          });
           addNotification({
             type: NOTIFICATION_TYPES.OVERDUE_INVOICES,
             priority: NOTIFICATION_PRIORITY.WARNING,
             title: 'Kavēti rēķini (sistēma)',
-            message: `Sistēmā ir ${othersOverdue.length} kavēts${othersOverdue.length > 1 ? 'i' : ''} rēķins${othersOverdue.length > 1 ? 'i' : ''}.`,
+            message: `Sistēmā ir ${othersOverdue.length} ${othersOverdue.length > 1 ? 'kavēti rēķini' : 'kavēts rēķins'}.`,
             actionUrl: '/invoices?status=overdue',
             metadata: { count: othersOverdue.length, invoices: othersOverdue },
-          });
+          }, key);
         }
       }
 
@@ -293,25 +450,33 @@ export const NotificationProvider = ({ children }) => {
         const othersPending = pendingInvestigation.filter((inv) => inv.user_id !== userId);
 
         if (ownPending.length > 0) {
+          const key = generateNotificationKey(NOTIFICATION_TYPES.PENDING_INVESTIGATION, { 
+            count: ownPending.length, 
+            invoices: ownPending 
+          });
           addNotification({
             type: NOTIFICATION_TYPES.PENDING_INVESTIGATION,
             priority: NOTIFICATION_PRIORITY.WARNING,
             title: 'Rēķini gaida pārbaudi',
-            message: `${ownPending.length} rēķins${ownPending.length > 1 ? 'i' : ''} gaida apmaksu jau 3+ dienas. Nepieciešama pārbaude.`,
+            message: `${ownPending.length} ${ownPending.length > 1 ? 'rēķini' : 'rēķins'} gaida apmaksu jau 3+ dienas. Nepieciešama pārbaude.`,
             actionUrl: '/invoices?status=pending',
             metadata: { count: ownPending.length, invoices: ownPending },
-          });
+          }, key);
         }
 
         if (userIsAdmin && othersPending.length > 0) {
+          const key = generateNotificationKey(NOTIFICATION_TYPES.PENDING_INVESTIGATION, { 
+            count: othersPending.length, 
+            invoices: othersPending 
+          });
           addNotification({
             type: NOTIFICATION_TYPES.PENDING_INVESTIGATION,
             priority: NOTIFICATION_PRIORITY.WARNING,
             title: 'Rēķini gaida pārbaudi (sistēma)',
-            message: `Sistēmā ir ${othersPending.length} rēķins${othersPending.length > 1 ? 'i' : ''}, kas gaida apmaksu jau 3+ dienas.`,
+            message: `Sistēmā ir ${othersPending.length} ${othersPending.length > 1 ? 'rēķini' : 'rēķins'}, kas gaida apmaksu jau 3+ dienas.`,
             actionUrl: '/invoices?status=pending',
             metadata: { count: othersPending.length, invoices: othersPending },
-          });
+          }, key);
         }
       }
 
@@ -325,6 +490,10 @@ export const NotificationProvider = ({ children }) => {
         }) || [];
 
         if (draftWarnings.length > 0) {
+          const key = generateNotificationKey(NOTIFICATION_TYPES.DRAFT_DELETION_WARNING, { 
+            count: draftWarnings.length, 
+            invoices: draftWarnings 
+          });
           addNotification({
             type: NOTIFICATION_TYPES.DRAFT_DELETION_WARNING,
             priority: NOTIFICATION_PRIORITY.WARNING,
@@ -332,14 +501,52 @@ export const NotificationProvider = ({ children }) => {
             message: `${draftWarnings.length} melnraksts${draftWarnings.length > 1 ? 'i' : ''} tiks dzēsts${draftWarnings.length > 1 ? 'ti' : ''} pēc 2 dienām. Lūdzu, pabeidziet vai dzēsiet tos.`,
             actionUrl: '/invoices?status=draft',
             metadata: { count: draftWarnings.length, invoices: draftWarnings },
-          });
+          }, key);
         }
       }
 
       setLastDailyDigest(today);
+      // Save last daily digest date to localStorage
+      if (userProfile?.id) {
+        try {
+          localStorage.setItem(getLastDigestKey(userProfile.id), today);
+        } catch {
+          // Ignore
+        }
+      }
     } catch (error) {
     }
   }, [userProfile, isAdmin, isSuperAdmin, lastDailyDigest, addNotification]);
+
+  // Load notifications and deleted keys from localStorage on mount
+  useEffect(() => {
+    if (currentUser?.id) {
+      const loadedNotifications = loadNotifications(currentUser.id);
+      const loadedDeletedKeys = loadDeletedKeys(currentUser.id);
+      
+      // Calculate unread count from loaded notifications
+      const unread = loadedNotifications.filter(n => !n.read).length;
+      
+      setNotifications(loadedNotifications);
+      setUnreadCount(unread);
+      setDeletedNotificationKeys(loadedDeletedKeys);
+      
+      // Load last daily digest date
+      try {
+        const storedDigest = localStorage.getItem(getLastDigestKey(currentUser.id));
+        if (storedDigest) {
+          setLastDailyDigest(storedDigest);
+        }
+      } catch {
+        // Ignore
+      }
+    } else {
+      // Clear notifications when user logs out
+      setNotifications([]);
+      setUnreadCount(0);
+      setDeletedNotificationKeys(new Set());
+    }
+  }, [currentUser]);
 
   // Check daily digest on mount and when user profile loads
   useEffect(() => {
@@ -371,6 +578,8 @@ export const NotificationProvider = ({ children }) => {
   useEffect(() => {
     if (!currentUser) return;
 
+    console.log('🔔 Setting up realtime subscription for invoice notifications...');
+
     const subscription = supabase
       .channel('invoice-notifications')
       .on(
@@ -381,23 +590,35 @@ export const NotificationProvider = ({ children }) => {
           table: 'invoices',
         },
         (payload) => {
+          console.log('📨 Realtime event received:', {
+            event: payload.eventType,
+            invoiceNumber: payload.new?.invoice_number,
+            oldStatus: payload.old?.status,
+            newStatus: payload.new?.status,
+          });
+
           const invoice = payload.new;
           const oldInvoice = payload.old;
 
           // Invoice paid notification
           if (invoice.status === 'paid' && oldInvoice.status !== 'paid') {
+            console.log('✅ Invoice paid! Showing notification...');
             notifyInvoicePaid(invoice, invoice.payment_method || '');
           }
 
           // Stock update failed notification
           if (invoice.stock_update_status === 'failed') {
+            console.log('❌ Stock update failed! Showing notification...');
             notifyStockUpdateFailed(invoice);
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('🔌 Realtime subscription status:', status);
+      });
 
     return () => {
+      console.log('🔌 Unsubscribing from realtime...');
       subscription.unsubscribe();
     };
   }, [currentUser, notifyInvoicePaid, notifyStockUpdateFailed]);

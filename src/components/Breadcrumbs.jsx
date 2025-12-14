@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Breadcrumb } from 'antd';
 import { HomeOutlined } from '@ant-design/icons';
@@ -7,6 +7,18 @@ const Breadcrumbs = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const params = useParams();
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowWidth(window.innerWidth);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isMobile = windowWidth < 576;
 
   const breadcrumbItems = useMemo(() => {
     const items = [];
@@ -20,18 +32,10 @@ const Breadcrumbs = () => {
             e.preventDefault();
             navigate('/dashboard');
           }}
-          style={{ 
-            color: '#6b7280', 
-            fontSize: '16px', 
-            fontWeight: 500, 
-            textDecoration: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
+          className="breadcrumb-link breadcrumb-home"
         >
-          <HomeOutlined />
-          <span>Sākums</span>
+          <HomeOutlined className="breadcrumb-icon" />
+          {!isMobile && <span className="breadcrumb-home-text">Sākums</span>}
         </a>
       ),
     });
@@ -39,12 +43,16 @@ const Breadcrumbs = () => {
     // Parse pathname into segments
     const segments = pathname.split('/').filter(Boolean);
 
-    // Map route segments to breadcrumb labels
+    // Map route segments to breadcrumb labels (all in Latvian)
     const routeLabels = {
       dashboard: 'Informācijas panelis',
       invoices: 'Rēķini',
       'invoice-templates': 'Mani paraugi',
       'sales-charts': 'Pārdošanas grafiki',
+      overview: 'Pārskats',
+      statistics: 'Statistika',
+      'sales-analytics': 'Pārdošanas analītika',
+      analytics: 'Vispārējā analītika',
       'user-accounts': 'Lietotāju konti',
       'activity-logs': 'Darbību žurnāls',
       profile: 'Iestatījumi',
@@ -81,10 +89,13 @@ const Breadcrumbs = () => {
       // Special handling for invoice routes
       if (segment === 'invoice' && params.invoiceNumber) {
         const invoiceNumber = decodeURIComponent(params.invoiceNumber);
+        const displayNumber = isMobile && invoiceNumber.length > 10 
+          ? invoiceNumber.substring(0, 8) + '...' 
+          : invoiceNumber;
         items.push({
           title: (
-            <span style={{ color: '#111827', fontSize: '16px', fontWeight: 500 }}>
-              Rēķins {invoiceNumber}
+            <span className="breadcrumb-text breadcrumb-text-current">
+              {isMobile ? 'Rēķins' : `Rēķins ${displayNumber}`}
             </span>
           ),
         });
@@ -103,12 +114,7 @@ const Breadcrumbs = () => {
                     e.preventDefault();
                     navigate('/invoices');
                   }}
-                  style={{ 
-                    color: '#6b7280', 
-                    fontSize: '16px', 
-                    fontWeight: 500, 
-                    textDecoration: 'none' 
-                  }}
+                  className="breadcrumb-link"
                 >
                   {routeLabels.invoices}
                 </a>
@@ -122,12 +128,7 @@ const Breadcrumbs = () => {
                     e.preventDefault();
                     navigate('/invoices');
                   }}
-                  style={{ 
-                    color: '#6b7280', 
-                    fontSize: '16px', 
-                    fontWeight: 500, 
-                    textDecoration: 'none' 
-                  }}
+                  className="breadcrumb-link"
                 >
                   {routeLabels.invoices}
                 </a>
@@ -136,10 +137,13 @@ const Breadcrumbs = () => {
             // Add invoice number breadcrumb - don't show "Rediģēt"
             if (params.invoiceNumber) {
               const invoiceNumber = decodeURIComponent(params.invoiceNumber);
+              const displayNumber = isMobile && invoiceNumber.length > 10 
+                ? invoiceNumber.substring(0, 8) + '...' 
+                : invoiceNumber;
               items.push({
                 title: (
-                  <span style={{ color: '#111827', fontSize: '16px', fontWeight: 500 }}>
-                    Rēķins {invoiceNumber}
+                  <span className="breadcrumb-text breadcrumb-text-current">
+                    {isMobile ? 'Rēķins' : `Rēķins ${displayNumber}`}
                   </span>
                 ),
               });
@@ -151,7 +155,7 @@ const Breadcrumbs = () => {
           // Just /invoices
           items.push({
             title: (
-              <span style={{ color: '#111827', fontSize: '16px', fontWeight: 500 }}>
+              <span className="breadcrumb-text breadcrumb-text-current">
                 {routeLabels.invoices}
               </span>
             ),
@@ -164,8 +168,8 @@ const Breadcrumbs = () => {
       if (segment === 'create' && segments[index - 1] === 'invoices') {
         items.push({
           title: (
-            <span style={{ color: '#111827', fontSize: '16px', fontWeight: 500 }}>
-              Izveidot rēķinu
+            <span className="breadcrumb-text breadcrumb-text-current">
+              {isMobile ? 'Izveidot' : 'Izveidot rēķinu'}
             </span>
           ),
         });
@@ -174,13 +178,15 @@ const Breadcrumbs = () => {
       
       // Get label for current segment
       const label = routeLabels[segment] || segment;
+      // Truncate long labels on mobile
+      const displayLabel = isMobile && label.length > 15 ? label.substring(0, 13) + '...' : label;
       
       if (isLast) {
         // Last item - not clickable
         items.push({
           title: (
-            <span style={{ color: '#111827', fontSize: '16px', fontWeight: 500 }}>
-              {label}
+            <span className="breadcrumb-text breadcrumb-text-current">
+              {displayLabel}
             </span>
           ),
         });
@@ -193,14 +199,9 @@ const Breadcrumbs = () => {
                 e.preventDefault();
                 navigate(currentPath);
               }}
-              style={{ 
-                color: '#6b7280', 
-                fontSize: '16px', 
-                fontWeight: 500, 
-                textDecoration: 'none' 
-              }}
+              className="breadcrumb-link"
             >
-              {label}
+              {displayLabel}
             </a>
           ),
         });
@@ -208,7 +209,7 @@ const Breadcrumbs = () => {
     });
 
     return items;
-  }, [location.pathname, params, navigate]);
+  }, [location.pathname, params, navigate, isMobile]);
 
   // Don't show breadcrumbs on login or public routes
   if (location.pathname === '/login' || location.pathname.startsWith('/i/')) {
@@ -216,13 +217,114 @@ const Breadcrumbs = () => {
   }
 
   return (
-    <Breadcrumb
-      separator={<span style={{ color: '#6b7280', fontSize: '16px', fontWeight: 500 }}>/</span>}
-      items={breadcrumbItems}
-      style={{ marginBottom: '24px' }}
-    />
+    <>
+      <Breadcrumb
+        separator={<span className="breadcrumb-separator">/</span>}
+        items={breadcrumbItems}
+        className="breadcrumb-container"
+      />
+      
+      <style>{`
+        .breadcrumb-container {
+          margin-bottom: 24px;
+          overflow: hidden;
+        }
+
+        .breadcrumb-link {
+          color: #6b7280;
+          font-size: 16px;
+          font-weight: 500;
+          text-decoration: none;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          transition: color 0.2s;
+        }
+
+        .breadcrumb-link:hover {
+          color: #0068FF;
+        }
+
+        .breadcrumb-icon {
+          font-size: 16px;
+          display: inline-flex;
+          align-items: center;
+        }
+
+        .breadcrumb-home {
+          gap: 10px !important;
+        }
+
+        .breadcrumb-home-text {
+          margin-left: 2px;
+          display: inline-flex;
+          align-items: center;
+        }
+
+        .breadcrumb-text {
+          font-size: 16px;
+          font-weight: 500;
+        }
+
+        .breadcrumb-text-current {
+          color: #111827;
+        }
+
+        .breadcrumb-separator {
+          color: #6b7280;
+          font-size: 16px;
+          font-weight: 500;
+        }
+
+        /* Mobile Responsive (< 576px) */
+        @media (max-width: 575px) {
+          .breadcrumb-container {
+            margin-bottom: 16px;
+          }
+
+          .breadcrumb-link {
+            font-size: 14px;
+            gap: 4px;
+          }
+
+          .breadcrumb-icon {
+            font-size: 14px;
+          }
+
+          .breadcrumb-text {
+            font-size: 14px;
+          }
+
+          .breadcrumb-separator {
+            font-size: 14px;
+          }
+        }
+
+        /* Tablet Responsive (576px - 991px) */
+        @media (min-width: 576px) and (max-width: 991px) {
+          .breadcrumb-container {
+            margin-bottom: 20px;
+          }
+
+          .breadcrumb-link {
+            font-size: 15px;
+          }
+
+          .breadcrumb-icon {
+            font-size: 15px;
+          }
+
+          .breadcrumb-text {
+            font-size: 15px;
+          }
+
+          .breadcrumb-separator {
+            font-size: 15px;
+          }
+        }
+      `}</style>
+    </>
   );
 };
 
 export default Breadcrumbs;
-

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button, Table, message, Modal, Input, Dropdown, Card, Typography, Spin, Tag, App, Popconfirm, Tooltip } from 'antd';
-import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined, InfoCircleOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import Pagination from '../components/Pagination';
@@ -856,49 +856,6 @@ const Invoices = () => {
       sorter: (a, b) => parseFloat(a.total || 0) - parseFloat(b.total || 0),
       sortDirections: ['ascend', 'descend'],
       render: (amount) => <Text style={{ fontWeight: 500, color: '#111827' }}>€{parseFloat(amount).toFixed(2)}</Text>,
-    },
-    {
-      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Klients informēts</span>,
-      dataIndex: 'sent_at',
-      key: 'sent_at',
-      sorter: (a, b) => {
-        const aHasSent = a.sent_at ? 1 : 0;
-        const bHasSent = b.sent_at ? 1 : 0;
-        return aHasSent - bHasSent;
-      },
-      sortDirections: ['ascend', 'descend'],
-      width: 120,
-      render: (sentAt, record) => {
-        const isNotified = !!sentAt;
-        return (
-          <Tooltip
-            title={
-              isNotified
-                ? `Klients informēts: ${sentAt ? formatDate(sentAt) : 'Nezināms datums'}`
-                : 'Klients nav informēts. Automātiskie atgādinājuma e-pasti nedarbosies.'
-            }
-            placement="top"
-          >
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              {isNotified ? (
-                <CheckCircleOutlined
-                  style={{
-                    fontSize: '20px',
-                    color: '#10b981',
-                  }}
-                />
-              ) : (
-                <CloseCircleOutlined
-                  style={{
-                    fontSize: '20px',
-                    color: '#ef4444',
-                  }}
-                />
-              )}
-            </div>
-          </Tooltip>
-        );
-      },
     },
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Statuss</span>,

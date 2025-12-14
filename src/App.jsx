@@ -14,6 +14,9 @@ import PublicInvoice from './pages/PublicInvoice';
 import InvoiceTemplates from './pages/InvoiceTemplates';
 import ActivityLogs from './pages/ActivityLogs';
 import SalesCharts from './pages/SalesCharts';
+import Analytics from './pages/Analytics';
+import Statistics from './pages/Statistics';
+import SalesAnalytics from './pages/SalesAnalytics';
 
 function App() {
   return (
@@ -120,6 +123,42 @@ function App() {
         element={
           <ProtectedRoute>
             <SalesCharts />
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/sales-charts/overview" 
+        element={
+          <ProtectedRoute>
+            <SalesCharts />
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/sales-charts/statistics" 
+        element={
+          <ProtectedRoute>
+            <Statistics />
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/sales-charts/sales-analytics" 
+        element={
+          <ProtectedRoute>
+            <SalesAnalytics />
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/sales-charts/analytics" 
+        element={
+          <ProtectedRoute>
+            <Analytics />
           </ProtectedRoute>
         } 
       />

@@ -1,656 +1,297 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { Card, Row, Col, Table, Typography, Select, Spin, Tooltip, Alert } from 'antd';
-import { InfoCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
-import {
-  Chart,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  ArcElement,
-  BarElement,
-  LineController,
-  DoughnutController,
-  Title as ChartTitle,
-  Tooltip as ChartTooltip,
-  Legend,
-  Filler,
-} from 'chart.js';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Card, Row, Col, Typography, Spin, Table } from 'antd';
+import { UserOutlined, ShoppingOutlined, ClockCircleOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import { LineChart, BarChart, PieChart } from '@mui/x-charts';
 import DashboardLayout from '../components/DashboardLayout';
 import { useAuth } from '../contexts/AuthContext';
 import { useUserRole } from '../hooks/useUserRole';
-import { supabase } from '../lib/supabase';
+import { useInvoiceData } from '../contexts/InvoiceDataContext';
 
-Chart.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  ArcElement,
-  BarElement,
-  LineController,
-  DoughnutController,
-  ChartTitle,
-  ChartTooltip,
-  Legend,
-  Filler
+const { Text, Title } = Typography;
+
+// Euro Icon Component
+const EuroIcon = () => (
+  <div style={{
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '24px',
+    fontWeight: 600,
+    color: 'currentColor',
+    lineHeight: 1,
+  }}>
+    €
+  </div>
 );
-
-const { Title, Text } = Typography;
-const { Option } = Select;
 
 const Dashboard = () => {
   const { userProfile: authProfile, currentUser, loading: authLoading } = useAuth();
   const { userProfile, isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
-  const lineChartRef = useRef(null);
-  const pieChartRef = useRef(null);
-  const [lineChartInstance, setLineChartInstance] = useState(null);
-  const [pieChartInstance, setPieChartInstance] = useState(null);
-  const hasFetchedRef = useRef(false);
-  const isFetchingRef = useRef(false);
-  const prevSalesDataRef = useRef([]);
-  const prevSelectedMonthRef = useRef('');
-  const prevInvoiceStatusDataRef = useRef({});
+  const { invoices, loading: invoicesLoading, getPaidInvoices } = useInvoiceData();
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   
   const [dashboardData, setDashboardData] = useState({
-    monthlyIncome: 0,
-    monthlyIncomeChange: 0,
-    activeInvoices: 0,
-    activeInvoicesChange: 0,
-    createdInvoices: 0,
-    createdInvoicesChange: 0,
+    totalOrders: 0,
+    totalOrdersChange: 0,
     unpaidInvoices: 0,
     unpaidInvoicesChange: 0,
-    salesData: [],
-    latestUsers: [],
-    latestInvoices: [],
-    invoiceStatusData: {},
+    totalRevenue: 0,
+    totalRevenueChange: 0,
+    totalCustomers: 0,
+    totalCustomersChange: 0,
+    chartData: {
+      orders: [],
+      unpaid: [],
+      revenue: [],
+      customers: [],
+    },
+    revenueChartData: {
+      labels: [],
+      values: [],
+    },
+    statusDistribution: [],
+    recentInvoices: [],
+    monthlyComparison: {
+      current: 0,
+      previous: 0,
+    },
   });
-  const [loading, setLoading] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState('current'); // 'current', 'last', 'last2'
-  const [showDisclaimer, setShowDisclaimer] = useState(true);
 
-  // Memoize admin status to prevent unnecessary re-renders
   const isAdminUser = useMemo(() => isAdmin || isSuperAdmin, [isAdmin, isSuperAdmin]);
   const userId = useMemo(() => userProfile?.id, [userProfile?.id]);
 
-  // Get username with fallback
-  const userName = useMemo(() => {
-    if (authLoading || roleLoading) return '';
-    return userProfile?.username || authProfile?.username || currentUser?.email?.split('@')[0] || 'User';
-  }, [userProfile?.username, authProfile?.username, currentUser?.email, authLoading, roleLoading]);
-
-  // Get current month and calculate month ranges
-  const getMonthRanges = () => {
+  const getMonthRanges = useCallback(() => {
     const now = new Date();
     const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const last2Month = new Date(now.getFullYear(), now.getMonth() - 2, 1);
     const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
     return {
       current: { start: currentMonth, end: nextMonth },
       last: { start: lastMonth, end: currentMonth },
-      last2: { start: last2Month, end: lastMonth },
     };
-  };
+  }, []);
 
-  // Set document title
   useEffect(() => {
     document.title = 'Informācijas panelis | Piffdeals';
   }, []);
 
-  // Check localStorage for disclaimer visibility
   useEffect(() => {
-    const disclaimerClosed = localStorage.getItem('salesChartsDisclaimerClosed');
-    if (disclaimerClosed === 'true') {
-      setShowDisclaimer(false);
-    }
+    const handleResize = () => {
+      setWindowWidth(window.innerWidth);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Reset fetch flag when user changes
-  useEffect(() => {
-    if (userId && hasFetchedRef.current !== userId) {
-      hasFetchedRef.current = false;
+  // Calculate dashboard data from shared invoice context
+  const calculateDashboardData = useCallback(() => {
+    if (!invoices || invoices.length === 0) {
+      return;
     }
-  }, [userId]);
 
-  // Handle disclaimer close
-  const handleDisclaimerClose = () => {
-    setShowDisclaimer(false);
-    localStorage.setItem('salesChartsDisclaimerClosed', 'true');
-  };
+    const monthRanges = getMonthRanges();
+    const currentRange = monthRanges.current;
+    const lastRange = monthRanges.last;
 
-  // Fetch dashboard data
-  useEffect(() => {
-    // Prevent multiple simultaneous fetches
-    if (roleLoading || !userProfile || !userId || isFetchingRef.current) return;
+    const allInvoices = invoices;
 
-    // Only fetch once per user session unless explicitly needed
-    if (hasFetchedRef.current === userId) return;
+    // Calculate total orders
+    const currentMonthOrders = allInvoices?.filter(inv => {
+      const createdDate = new Date(inv.created_at);
+      return createdDate >= currentRange.start && createdDate < currentRange.end;
+    }).length || 0;
+    const lastMonthOrders = allInvoices?.filter(inv => {
+      const createdDate = new Date(inv.created_at);
+      return createdDate >= lastRange.start && createdDate < lastRange.end;
+    }).length || 0;
+    const totalOrders = allInvoices?.length || 0;
+    const totalOrdersChange = lastMonthOrders > 0
+      ? ((currentMonthOrders - lastMonthOrders) / lastMonthOrders) * 100
+      : (currentMonthOrders > 0 ? 100 : 0);
 
-    const fetchDashboardData = async () => {
-      // Set flag to prevent concurrent fetches
-      if (isFetchingRef.current) return;
-      isFetchingRef.current = true;
+    // Calculate unpaid invoices (sent, pending, overdue statuses)
+    const currentMonthUnpaid = allInvoices?.filter(inv => {
+      const createdDate = new Date(inv.created_at);
+      return createdDate >= currentRange.start && createdDate < currentRange.end &&
+             ['sent', 'pending', 'overdue'].includes(inv.status);
+    }).length || 0;
+    const lastMonthUnpaid = allInvoices?.filter(inv => {
+      const createdDate = new Date(inv.created_at);
+      return createdDate >= lastRange.start && createdDate < lastRange.end &&
+             ['sent', 'pending', 'overdue'].includes(inv.status);
+    }).length || 0;
+    const unpaidInvoices = allInvoices?.filter(inv => 
+      ['sent', 'pending', 'overdue'].includes(inv.status)
+    ).length || 0;
+    const unpaidInvoicesChange = lastMonthUnpaid > 0
+      ? ((currentMonthUnpaid - lastMonthUnpaid) / lastMonthUnpaid) * 100
+      : (currentMonthUnpaid > 0 ? 100 : 0);
 
-      try {
-        setLoading(true);
+    // Calculate total revenue (from paid invoices)
+    const paidInvoices = allInvoices?.filter(inv => inv.status === 'paid') || [];
+    const totalRevenue = paidInvoices.reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
+    const lastMonthPaid = paidInvoices.filter(inv => {
+      const paidDate = new Date(inv.paid_date || inv.updated_at);
+      return paidDate >= lastRange.start && paidDate < lastRange.end;
+    });
+    const lastMonthRevenue = lastMonthPaid.reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
+    const totalRevenueChange = lastMonthRevenue > 0
+      ? ((totalRevenue - lastMonthRevenue) / lastMonthRevenue) * 100
+      : (totalRevenue > 0 ? 100 : 0);
 
-        // Get month ranges
-        const monthRanges = getMonthRanges();
-        const currentRange = monthRanges.current;
-        const lastRange = monthRanges.last;
-
-        // Fetch ALL invoices for sales metrics and sales chart (global data)
-        const { data: allInvoices, error: invoicesError } = await supabase
-          .from('invoices')
-          .select('*');
-
-        if (invoicesError) throw invoicesError;
-
-        // For employees: fetch their own invoices for pie chart and latest invoices table
-        let employeeInvoices = [];
-        if (!isAdminUser) {
-          const { data: empInvoices, error: empError } = await supabase
-            .from('invoices')
-            .select('*')
-            .eq('user_id', userId);
-          
-          if (!empError && empInvoices) {
-            employeeInvoices = empInvoices;
-          }
-        }
-
-        // Calculate current month income (only paid invoices)
-        const currentMonthPaid = allInvoices?.filter(inv => {
-          if (inv.status !== 'paid') return false;
-          const paidDate = new Date(inv.paid_date || inv.updated_at);
-          return paidDate >= currentRange.start && paidDate < currentRange.end;
-        }) || [];
-
-        const currentMonthIncome = currentMonthPaid.reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
-
-        // Calculate last month income
-        const lastMonthPaid = allInvoices?.filter(inv => {
-          if (inv.status !== 'paid') return false;
-          const paidDate = new Date(inv.paid_date || inv.updated_at);
-          return paidDate >= lastRange.start && paidDate < lastRange.end;
-        }) || [];
-
-        const lastMonthIncome = lastMonthPaid.reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
-
-        // Calculate income change percentage
-        const monthlyIncomeChange = lastMonthIncome > 0
-          ? ((currentMonthIncome - lastMonthIncome) / lastMonthIncome) * 100
-          : (currentMonthIncome > 0 ? 100 : 0);
-
-        // Calculate active invoices (sent, pending, overdue)
-        const currentActive = allInvoices?.filter(inv => {
-          const createdDate = new Date(inv.created_at);
-          return ['sent', 'pending', 'overdue'].includes(inv.status) &&
-                 createdDate >= currentRange.start && createdDate < currentRange.end;
-        }).length || 0;
-
-        const lastActive = allInvoices?.filter(inv => {
-          const createdDate = new Date(inv.created_at);
-          return ['sent', 'pending', 'overdue'].includes(inv.status) &&
-                 createdDate >= lastRange.start && createdDate < lastRange.end;
-        }).length || 0;
-
-        const activeInvoicesChange = lastActive > 0
-          ? ((currentActive - lastActive) / lastActive) * 100
-          : (currentActive > 0 ? 100 : 0);
-
-        // Calculate created invoices
-        const currentCreated = allInvoices?.filter(inv => {
-          const createdDate = new Date(inv.created_at);
-          return createdDate >= currentRange.start && createdDate < currentRange.end;
-        }).length || 0;
-
-        const lastCreated = allInvoices?.filter(inv => {
-          const createdDate = new Date(inv.created_at);
-          return createdDate >= lastRange.start && createdDate < lastRange.end;
-        }).length || 0;
-
-        const createdInvoicesChange = lastCreated > 0
-          ? ((currentCreated - lastCreated) / lastCreated) * 100
-          : (currentCreated > 0 ? 100 : 0);
-
-        // Calculate unpaid invoices (sent, pending, overdue) - FIXED to include 'sent'
-        const currentUnpaid = allInvoices?.filter(inv => {
-          return ['sent', 'pending', 'overdue'].includes(inv.status);
-        }).length || 0;
-
-        const lastUnpaid = allInvoices?.filter(inv => {
-          const createdDate = new Date(inv.created_at);
-          return ['sent', 'pending', 'overdue'].includes(inv.status) &&
-                 createdDate < currentRange.start;
-        }).length || 0;
-
-        const unpaidInvoicesChange = lastUnpaid > 0
-          ? ((currentUnpaid - lastUnpaid) / lastUnpaid) * 100
-          : (currentUnpaid > 0 ? 100 : 0);
-
-        // Calculate invoice status distribution for pie chart
-        // For employees: use only their own invoices
-        // For admins: use all invoices
-        const invoicesForStatusChart = isAdminUser ? allInvoices : employeeInvoices;
-        const invoiceStatusCounts = {
-          paid: 0,
-          sent: 0,
-          pending: 0,
-          overdue: 0,
-          draft: 0,
-          cancelled: 0,
-        };
-
-        invoicesForStatusChart?.forEach(inv => {
-          if (invoiceStatusCounts.hasOwnProperty(inv.status)) {
-            invoiceStatusCounts[inv.status]++;
-          }
-        });
-
-        // Fetch sales data for chart (last 3 months)
-        const salesData = [];
-
-        for (let i = 2; i >= 0; i--) {
-          const monthStart = new Date(new Date().getFullYear(), new Date().getMonth() - i, 1);
-          const monthEnd = new Date(new Date().getFullYear(), new Date().getMonth() - i + 1, 1);
-          
-          const monthPaid = allInvoices?.filter(inv => {
-            if (inv.status !== 'paid') return false;
-            const paidDate = new Date(inv.paid_date || inv.updated_at);
-            return paidDate >= monthStart && paidDate < monthEnd;
-          }) || [];
-
-          const monthIncome = monthPaid.reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
-          
-          const monthName = monthStart.toLocaleDateString('lv-LV', { month: 'short', year: 'numeric' });
-          salesData.push({ month: monthName, income: monthIncome });
-        }
-
-        // Fetch latest users (only for admins) with creator info
-        let latestUsers = [];
-        if (isAdminUser) {
-          const { data: usersData, error: usersError } = await supabase
-            .from('user_profiles')
-            .select('id, email, username, created_at, created_by')
-            .order('created_at', { ascending: false })
-            .limit(7);
-
-          if (!usersError && usersData) {
-            // Get unique creator IDs
-            const creatorIds = [...new Set(usersData.map(u => u.created_by).filter(Boolean))];
-            
-            // Fetch creator profiles
-            let creatorsMap = {};
-            if (creatorIds.length > 0) {
-              const { data: creatorsData } = await supabase
-                .from('user_profiles')
-                .select('id, username, email')
-                .in('id', creatorIds);
-              
-              if (creatorsData) {
-                creatorsMap = creatorsData.reduce((acc, creator) => {
-                  acc[creator.id] = creator;
-                  return acc;
-                }, {});
-              }
-            }
-
-            latestUsers = usersData.map(user => ({
-              ...user,
-              key: user.id,
-              creator: user.created_by ? creatorsMap[user.created_by] : null,
-            }));
-          }
-        }
-
-        // Fetch latest 5 invoices
-        // For employees: show only their own invoices
-        // For admins: show all invoices
-        const invoicesForTable = isAdminUser ? allInvoices : employeeInvoices;
-        const latestInvoices = invoicesForTable
-          ?.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-          .slice(0, 5)
-          .map(inv => ({
-            ...inv,
-            key: inv.id,
-          })) || [];
-
-        setDashboardData({
-          monthlyIncome: currentMonthIncome,
-          monthlyIncomeChange,
-          activeInvoices: currentActive,
-          activeInvoicesChange,
-          createdInvoices: currentCreated,
-          createdInvoicesChange,
-          unpaidInvoices: currentUnpaid,
-          unpaidInvoicesChange,
-          salesData,
-          latestUsers,
-          latestInvoices,
-          invoiceStatusData: invoiceStatusCounts,
-        });
-        
-        // Mark as fetched for this user
-        hasFetchedRef.current = userId;
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setLoading(false);
-        isFetchingRef.current = false;
+    // Calculate total customers
+    const uniqueCustomers = new Set();
+    allInvoices?.forEach(inv => {
+      if (inv.customer_name) {
+        uniqueCustomers.add(inv.customer_name);
       }
+    });
+    const totalCustomers = uniqueCustomers.size;
+    const currentMonthCustomers = new Set();
+    const lastMonthCustomers = new Set();
+    allInvoices?.forEach(inv => {
+      const createdDate = new Date(inv.created_at);
+      if (inv.customer_name) {
+        if (createdDate >= currentRange.start && createdDate < currentRange.end) {
+          currentMonthCustomers.add(inv.customer_name);
+        }
+        if (createdDate >= lastRange.start && createdDate < lastRange.end) {
+          lastMonthCustomers.add(inv.customer_name);
+        }
+      }
+    });
+    const totalCustomersChange = lastMonthCustomers.size > 0
+      ? ((currentMonthCustomers.size - lastMonthCustomers.size) / lastMonthCustomers.size) * 100
+      : (currentMonthCustomers.size > 0 ? 100 : 0);
+
+    // Generate mini chart data (last 7 days) - smooth curve data
+    const chartData = { orders: [], unpaid: [], revenue: [], customers: [] };
+    for (let i = 6; i >= 0; i--) {
+      const day = new Date();
+      day.setDate(day.getDate() - i);
+      const dayStart = new Date(day.setHours(0, 0, 0, 0));
+      const dayEnd = new Date(day.setHours(23, 59, 59, 999));
+      
+      const dayOrders = allInvoices?.filter(inv => {
+        const createdDate = new Date(inv.created_at);
+        return createdDate >= dayStart && createdDate <= dayEnd;
+      }).length || 0;
+      
+      const dayUnpaid = allInvoices?.filter(inv => {
+        const createdDate = new Date(inv.created_at);
+        return createdDate >= dayStart && createdDate <= dayEnd &&
+               ['sent', 'pending', 'overdue'].includes(inv.status);
+      }).length || 0;
+      
+      const dayPaid = paidInvoices.filter(inv => {
+        const paidDate = new Date(inv.paid_date || inv.updated_at);
+        return paidDate >= dayStart && paidDate <= dayEnd;
+      });
+      const dayRevenue = dayPaid.reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
+      
+      const dayCustomers = new Set();
+      allInvoices?.forEach(inv => {
+        const createdDate = new Date(inv.created_at);
+        if (inv.customer_name && createdDate >= dayStart && createdDate <= dayEnd) {
+          dayCustomers.add(inv.customer_name);
+        }
+      });
+      
+      chartData.orders.push(Math.max(0, dayOrders));
+      chartData.unpaid.push(Math.max(0, dayUnpaid));
+      chartData.revenue.push(Math.max(0, dayRevenue));
+      chartData.customers.push(Math.max(0, dayCustomers.size));
+    }
+
+    // Revenue chart data (last 6 months)
+    const revenueChartData = { labels: [], values: [] };
+    for (let i = 5; i >= 0; i--) {
+      const monthStart = new Date(new Date().getFullYear(), new Date().getMonth() - i, 1);
+      const monthEnd = new Date(new Date().getFullYear(), new Date().getMonth() - i + 1, 1);
+      
+      const monthPaid = paidInvoices.filter(inv => {
+        const paidDate = new Date(inv.paid_date || inv.updated_at);
+        return paidDate >= monthStart && paidDate < monthEnd;
+      });
+      const monthRevenue = monthPaid.reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
+      
+      const monthName = monthStart.toLocaleDateString('lv-LV', { month: 'short' });
+      revenueChartData.labels.push(monthName);
+      revenueChartData.values.push(Math.max(0, monthRevenue));
+    }
+
+    // Status distribution for pie chart
+    const statusCounts = {
+      paid: allInvoices?.filter(inv => inv.status === 'paid').length || 0,
+      sent: allInvoices?.filter(inv => inv.status === 'sent').length || 0,
+      pending: allInvoices?.filter(inv => inv.status === 'pending').length || 0,
+      overdue: allInvoices?.filter(inv => inv.status === 'overdue').length || 0,
     };
+    const statusDistribution = [
+      { id: 0, value: statusCounts.paid, label: 'Apmaksāts', color: '#12b76a' },
+      { id: 1, value: statusCounts.sent, label: 'Nosūtīts', color: '#0068FF' },
+      { id: 2, value: statusCounts.pending, label: 'Gaida', color: '#f59e0b' },
+      { id: 3, value: statusCounts.overdue, label: 'Nokavēts', color: '#ef4444' },
+    ].filter(item => item.value > 0);
 
-    fetchDashboardData();
-  }, [userId, isAdminUser, roleLoading]);
+    // Recent invoices
+    const recentInvoices = allInvoices?.slice(0, 5).map((inv, idx) => ({
+      key: idx,
+      invoice_number: inv.invoice_number,
+      customer_name: inv.customer_name || 'Nav norādīts',
+      total: parseFloat(inv.total || 0),
+      status: inv.status,
+      created_at: inv.created_at,
+    })) || [];
 
-  // Format percentage with color
+    // Monthly comparison
+    const currentMonthRevenue = paidInvoices.filter(inv => {
+      const paidDate = new Date(inv.paid_date || inv.updated_at);
+      return paidDate >= currentRange.start && paidDate < currentRange.end;
+    }).reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
+    
+    const previousMonthRevenue = paidInvoices.filter(inv => {
+      const paidDate = new Date(inv.paid_date || inv.updated_at);
+      return paidDate >= lastRange.start && paidDate < lastRange.end;
+    }).reduce((sum, inv) => sum + parseFloat(inv.total || 0), 0);
+
+    setDashboardData({
+      totalOrders,
+      totalOrdersChange,
+      unpaidInvoices,
+      unpaidInvoicesChange,
+      totalRevenue,
+      totalRevenueChange,
+      totalCustomers,
+      totalCustomersChange,
+      chartData,
+      revenueChartData,
+      statusDistribution,
+      recentInvoices,
+      monthlyComparison: {
+        current: currentMonthRevenue,
+        previous: previousMonthRevenue,
+      },
+    });
+  }, [invoices, getMonthRanges]);
+
+  // Recalculate when invoices change
+  useEffect(() => {
+    if (invoices && invoices.length > 0) {
+      calculateDashboardData();
+    }
+  }, [invoices, calculateDashboardData]);
+
   const formatPercentage = (value) => {
     const isPositive = value >= 0;
-    const color = isPositive ? '#22c55e' : '#ef4444';
+    const color = isPositive ? '#12b76a' : '#ef4444';
     const sign = isPositive ? '+' : '';
-    return { text: `${sign}${value.toFixed(1)}%`, color };
+    return { text: `${sign}${value.toFixed(1)}%`, color, isPositive };
   };
 
-  // Initialize line chart
-  useEffect(() => {
-    if (!lineChartRef.current || !dashboardData.salesData.length) return;
-
-    // Check if data or month selection actually changed
-    const dataChanged = JSON.stringify(dashboardData.salesData) !== JSON.stringify(prevSalesDataRef.current);
-    const monthChanged = selectedMonth !== prevSelectedMonthRef.current;
-    
-    if (!dataChanged && !monthChanged && lineChartInstance) {
-      // Data hasn't changed, no need to recreate chart
-      return;
-    }
-
-    // Update refs
-    prevSalesDataRef.current = dashboardData.salesData;
-    prevSelectedMonthRef.current = selectedMonth;
-
-    // Destroy existing chart if it exists
-    if (lineChartInstance) {
-      lineChartInstance.destroy();
-      setLineChartInstance(null);
-    }
-
-    const ctx = lineChartRef.current.getContext('2d');
-
-    let dataToShow = [];
-    if (selectedMonth === 'current') {
-      dataToShow = dashboardData.salesData.slice(-1);
-    } else if (selectedMonth === 'last') {
-      dataToShow = dashboardData.salesData.slice(-2, -1);
-    } else {
-      dataToShow = dashboardData.salesData.slice(-3, -2);
-    }
-
-    const chartInstance = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: dataToShow.map(d => d.month),
-        datasets: [
-          {
-            label: 'Ienākumi (€)',
-            data: dataToShow.map(d => d.income),
-            borderColor: '#137fec',
-            backgroundColor: 'rgba(19, 127, 236, 0.1)',
-            borderWidth: 3,
-            fill: true,
-            tension: 0.4,
-            pointRadius: 6,
-            pointHoverRadius: 8,
-            pointBackgroundColor: '#137fec',
-            pointBorderColor: '#ffffff',
-            pointBorderWidth: 2,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false,
-          },
-          tooltip: {
-            backgroundColor: 'rgba(0, 0, 0, 0.85)',
-            padding: 12,
-            titleFont: { size: 14, weight: 'bold' },
-            bodyFont: { size: 13 },
-            callbacks: {
-              label: function(context) {
-                return `Ienākumi: €${context.parsed.y.toFixed(2)}`;
-              },
-            },
-          },
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            ticks: {
-              callback: function(value) {
-                return '€' + value.toFixed(0);
-              },
-              font: {
-                size: 12,
-              },
-            },
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)',
-            },
-          },
-          x: {
-            grid: {
-              display: false,
-            },
-            ticks: {
-              font: {
-                size: 12,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    setLineChartInstance(chartInstance);
-
-    return () => {
-      if (chartInstance) {
-        chartInstance.destroy();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardData.salesData, selectedMonth]);
-
-  // Initialize pie chart for employees
-  useEffect(() => {
-    if (!pieChartRef.current || isAdminUser) return;
-    if (Object.values(dashboardData.invoiceStatusData).every(v => v === 0)) return;
-
-    // Check if data actually changed
-    const dataChanged = JSON.stringify(dashboardData.invoiceStatusData) !== JSON.stringify(prevInvoiceStatusDataRef.current);
-    
-    if (!dataChanged && pieChartInstance) {
-      // Data hasn't changed, no need to recreate chart
-      return;
-    }
-
-    // Update ref
-    prevInvoiceStatusDataRef.current = dashboardData.invoiceStatusData;
-
-    // Destroy existing chart if it exists
-    if (pieChartInstance) {
-      pieChartInstance.destroy();
-      setPieChartInstance(null);
-    }
-
-    const ctx = pieChartRef.current.getContext('2d');
-
-    const statusLabels = {
-      paid: 'Apmaksāts',
-      sent: 'Nosūtīts',
-      pending: 'Gaida',
-      overdue: 'Nokavēts',
-      draft: 'Melnraksts',
-      cancelled: 'Atcelts',
-    };
-
-    const statusColors = {
-      paid: '#22c55e',
-      sent: '#3b82f6',
-      pending: '#f59e0b',
-      overdue: '#ef4444',
-      draft: '#9ca3af',
-      cancelled: '#6b7280',
-    };
-
-    const labels = [];
-    const data = [];
-    const backgroundColor = [];
-
-    Object.entries(dashboardData.invoiceStatusData).forEach(([status, count]) => {
-      if (count > 0) {
-        labels.push(statusLabels[status] || status);
-        data.push(count);
-        backgroundColor.push(statusColors[status] || '#9ca3af');
-      }
-    });
-
-    const chartInstance = new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels,
-        datasets: [
-          {
-            data,
-            backgroundColor,
-            borderWidth: 2,
-            borderColor: '#ffffff',
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              padding: 15,
-              font: {
-                size: 12,
-              },
-              usePointStyle: true,
-            },
-          },
-          tooltip: {
-            backgroundColor: 'rgba(0, 0, 0, 0.85)',
-            padding: 12,
-            titleFont: { size: 14, weight: 'bold' },
-            bodyFont: { size: 13 },
-            callbacks: {
-              label: function(context) {
-                const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                const percentage = ((context.parsed / total) * 100).toFixed(1);
-                return `${context.label}: ${context.parsed} (${percentage}%)`;
-              },
-            },
-          },
-        },
-      },
-    });
-
-    setPieChartInstance(chartInstance);
-
-    return () => {
-      if (chartInstance) {
-        chartInstance.destroy();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardData.invoiceStatusData, isAdminUser]);
-
-  // Format date with leading zeros
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}.${month}.${year}`;
-  };
-
-  const invoiceColumns = [
-    {
-      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Rēķina ID</span>,
-      dataIndex: 'invoice_number',
-      key: 'invoice_number',
-      render: (text) => {
-        // Remove any existing # prefix to avoid double ##
-        const cleanText = text?.toString().replace(/^#+/, '') || '';
-        return (
-          <Text style={{ fontWeight: 500, color: '#111827' }}>#{cleanText}</Text>
-        );
-      },
-    },
-    {
-      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Klients</span>,
-      dataIndex: 'customer_name',
-      key: 'customer_name',
-      render: (text) => <Text style={{ color: '#6b7280' }}>{text || '-'}</Text>,
-    },
-    {
-      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Datums</span>,
-      dataIndex: 'issue_date',
-      key: 'issue_date',
-      render: (text) => <Text style={{ color: '#6b7280' }}>{formatDate(text)}</Text>,
-    },
-    {
-      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Kopā</span>,
-      dataIndex: 'total',
-      key: 'total',
-      render: (text) => <Text style={{ color: '#6b7280' }}>€{parseFloat(text || 0).toFixed(2)}</Text>,
-    },
-    {
-      title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Statuss</span>,
-      dataIndex: 'status',
-      key: 'status',
-      render: (status) => {
-        const statusStyles = {
-          paid: { background: '#dcfce7', color: '#166534', text: 'Apmaksāts' },
-          pending: { background: '#fef3c7', color: '#92400e', text: 'Gaida' },
-          overdue: { background: '#fee2e2', color: '#991b1b', text: 'Nokavēts' },
-          sent: { background: '#dbeafe', color: '#1e40af', text: 'Nosūtīts' },
-          draft: { background: '#f3f4f6', color: '#4b5563', text: 'Melnraksts' },
-          cancelled: { background: '#f3f4f6', color: '#4b5563', text: 'Atcelts' },
-        };
-        const style = statusStyles[status] || statusStyles.draft;
-        return (
-          <span
-            style={{
-              padding: '4px 8px',
-              fontSize: '12px',
-              fontWeight: 500,
-              background: style.background,
-              color: style.color,
-              borderRadius: '9999px',
-              display: 'inline-block',
-            }}
-          >
-            {style.text}
-          </span>
-        );
-      },
-    },
-  ];
-
-  if (authLoading || roleLoading || loading) {
+  if (authLoading || roleLoading || invoicesLoading) {
     return (
       <DashboardLayout>
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
@@ -660,357 +301,635 @@ const Dashboard = () => {
     );
   }
 
-  const incomePercent = formatPercentage(dashboardData.monthlyIncomeChange);
-  const activePercent = formatPercentage(dashboardData.activeInvoicesChange);
-  const createdPercent = formatPercentage(dashboardData.createdInvoicesChange);
+  const ordersPercent = formatPercentage(dashboardData.totalOrdersChange);
   const unpaidPercent = formatPercentage(dashboardData.unpaidInvoicesChange);
+  const revenuePercent = formatPercentage(dashboardData.totalRevenueChange);
+  const customersPercent = formatPercentage(dashboardData.totalCustomersChange);
 
-  const showUserRegistrations = isAdminUser;
-  const isEmployee = !isAdminUser;
+  // Stat Card Component
+  const StatCard = ({ icon, title, value, change, iconBg = '#EBF3FF', iconColor = '#0068FF', formatValue }) => {
+    const displayValue = formatValue ? formatValue(value) : value.toLocaleString();
+    
+    return (
+      <Card
+        className="stat-card"
+        style={{
+          borderRadius: '16px',
+          border: '1px solid #e2e8f0',
+          background: '#ffffff',
+          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+          height: '100%',
+        }}
+      >
+        <div className="stat-card-content">
+          <div className="stat-card-info">
+            <div className="stat-card-header">
+              <div className="stat-card-icon" style={{ background: iconBg, color: iconColor }}>
+                {icon}
+              </div>
+              <div className="stat-card-text">
+                <h3 className="stat-card-value">{displayValue}</h3>
+                <div className="stat-card-meta">
+                  <Text className="stat-card-title">{title}</Text>
+                  <span className="stat-card-change" style={{
+                    background: change.isPositive ? '#dcfce7' : '#fee2e2',
+                    color: change.isPositive ? '#166534' : '#991b1b',
+                  }}>
+                    {change.text}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  };
+
+  // Recent Invoices Table Columns
+  const invoiceColumns = [
+    {
+      title: 'Rēķina numurs',
+      dataIndex: 'invoice_number',
+      key: 'invoice_number',
+      render: (text) => (
+        <Text style={{ fontSize: '14px', fontWeight: 500, color: '#212B36' }}>
+          #{text?.toString().replace(/^#+/, '') || ''}
+        </Text>
+      ),
+    },
+    {
+      title: 'Klients',
+      dataIndex: 'customer_name',
+      key: 'customer_name',
+      render: (text) => (
+        <Text style={{ fontSize: '14px', color: '#637381' }}>{text}</Text>
+      ),
+    },
+    {
+      title: 'Summa',
+      dataIndex: 'total',
+      key: 'total',
+      render: (text) => (
+        <Text style={{ fontSize: '14px', fontWeight: 600, color: '#212B36' }}>
+          €{text.toFixed(2)}
+        </Text>
+      ),
+    },
+    {
+      title: 'Statuss',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status) => {
+        const statusStyles = {
+          paid: { background: '#dcfce7', color: '#166534', text: 'Apmaksāts' },
+          pending: { background: '#fef3c7', color: '#92400e', text: 'Gaida' },
+          overdue: { background: '#fee2e2', color: '#991b1b', text: 'Nokavēts' },
+          sent: { background: '#dbeafe', color: '#1e40af', text: 'Nosūtīts' },
+          draft: { background: '#f3f4f6', color: '#6b7280', text: 'Melnraksts' },
+          cancelled: { background: '#e5e7eb', color: '#4b5563', text: 'Atcelts' },
+        };
+        const style = statusStyles[status] || statusStyles.pending;
+        return (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '4px 10px',
+            borderRadius: '9999px',
+            fontSize: '12px',
+            fontWeight: 500,
+            background: style.background,
+            color: style.color,
+          }}>
+            {style.text}
+          </span>
+        );
+      },
+    },
+  ];
 
   return (
     <DashboardLayout>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-        {/* Page Header */}
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-            <Title level={1} style={{ margin: 0, fontSize: '30px', fontWeight: 700, color: '#111827', lineHeight: '1.2' }}>
-              Informācijas panelis
-            </Title>
-            <Tooltip 
-              title={
-                <div style={{ maxWidth: '300px' }}>
-                  <div style={{ fontWeight: 600, marginBottom: '8px' }}>Informācijas panelis</div>
-                  <div style={{ fontSize: '13px', lineHeight: '1.6' }}>
-                    Šeit redzams pārskats par jūsu rēķiniem un pārdošanu. Administrators redz visu sistēmas datu, bet darbinieki redz tikai savus rēķinus. Metrikas tiek aprēķinātas no apmaksātiem rēķiniem. Ienākumu izmaiņas tiek salīdzinātas ar iepriekšējo mēnesi.
-                  </div>
-                </div>
-              }
-              placement="right"
-            >
-              <InfoCircleOutlined style={{ color: '#6b7280', fontSize: '20px', cursor: 'help' }} />
-            </Tooltip>
-          </div>
-          <Text style={{ fontSize: '16px', color: '#6b7280', lineHeight: '1.5' }}>
-            {userName ? `Laipni lūdzam atpakaļ, ${userName}!` : 'Laipni lūdzam atpakaļ!'}
+      <div className="dashboard-container">
+        <div className="dashboard-header">
+          <Title level={1} className="dashboard-title">
+            Informācijas panelis
+          </Title>
+          <Text className="dashboard-subtitle">
+            Pārskats par jūsu biznesa veiktspēju un statistiku
           </Text>
         </div>
 
-        {/* Disclaimer */}
-        {showDisclaimer && (
-          <Alert
-            message="Svarīga informācija par pārdošanas datiem"
-            description="Visi pārdošanas grafiki un statistika tiek ģenerēti tikai no rēķiniem, kas izveidoti šajā sistēmā. Šie dati NAV saistīti ar faktisko Mozello ecommerce veikalu un neatspoguļo visus veikala pārdošanas datus."
-            type="info"
-            icon={<ExclamationCircleOutlined />}
-            showIcon
-            closable
-            onClose={handleDisclaimerClose}
-            style={{
-              borderRadius: '12px',
-              border: '1px solid #bfdbfe',
-              background: '#eff6ff',
-            }}
-          />
-        )}
+        {/* Stats Cards - 2x2 Grid */}
+        <Row gutter={[24, 24]} style={{ marginBottom: '32px' }}>
+          <Col xs={24} sm={12} lg={12}>
+            <StatCard
+              icon={<ShoppingOutlined style={{ fontSize: '24px' }} />}
+              title="Kopējie pasūtījumi"
+              value={dashboardData.totalOrders}
+              change={ordersPercent}
+            />
+          </Col>
+          <Col xs={24} sm={12} lg={12}>
+            <StatCard
+              icon={<ClockCircleOutlined style={{ fontSize: '24px' }} />}
+              title="Neapmaksātie rēķini"
+              value={dashboardData.unpaidInvoices}
+              change={unpaidPercent}
+              iconBg="#fef3c7"
+              iconColor="#f59e0b"
+            />
+          </Col>
+          <Col xs={24} sm={12} lg={12}>
+            <StatCard
+              icon={<EuroIcon />}
+              title="Kopējie ienākumi"
+              value={dashboardData.totalRevenue}
+              change={revenuePercent}
+              iconBg="#dcfce7"
+              iconColor="#12b76a"
+              formatValue={(val) => `€${val.toLocaleString('lv-LV', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            />
+          </Col>
+          <Col xs={24} sm={12} lg={12}>
+            <StatCard
+              icon={<UserOutlined style={{ fontSize: '24px' }} />}
+              title="Klienti"
+              value={dashboardData.totalCustomers}
+              change={customersPercent}
+            />
+          </Col>
+        </Row>
 
-        {/* Stats Cards */}
+        {/* Revenue Chart and Status Distribution */}
+        <Row gutter={[24, 24]} style={{ marginBottom: '32px' }}>
+          <Col xs={24} lg={12}>
+            <Card className="chart-card">
+              <div className="chart-card-header">
+                <Title level={4} className="chart-card-title">
+                  Ienākumi pēdējos 6 mēnešos
+                </Title>
+                <Text className="chart-card-subtitle">
+                  Kopējie ienākumi no apmaksātiem rēķiniem
+                </Text>
+              </div>
+              <div className="chart-card-content">
+                {dashboardData.revenueChartData.values.length > 0 ? (
+                  <BarChart
+                    width={undefined}
+                    height={300}
+                    series={[
+                      {
+                        data: dashboardData.revenueChartData.values,
+                        label: 'Ienākumi (€)',
+                      },
+                    ]}
+                    xAxis={[{
+                      scaleType: 'band',
+                      data: dashboardData.revenueChartData.labels,
+                    }]}
+                    yAxis={[{
+                      min: 0,
+                    }]}
+                    colors={['#0068FF']}
+                    sx={{
+                      width: '100%',
+                      '& .MuiBarElement-root': {
+                        borderRadius: '6px 6px 0 0',
+                      },
+                    }}
+                  />
+                ) : (
+                  <div className="chart-no-data">Pagaidām nav datu...</div>
+                )}
+              </div>
+            </Card>
+          </Col>
+          <Col xs={24} lg={12}>
+            <Card className="chart-card">
+              <div className="chart-card-header">
+                <Title level={4} className="chart-card-title">
+                  Rēķinu sadalījums pēc statusa
+                </Title>
+                <Text className="chart-card-subtitle">
+                  Rēķinu skaits pēc katra statusa
+                </Text>
+              </div>
+              <div className="chart-card-content chart-card-content-center">
+                {dashboardData.statusDistribution.length > 0 ? (
+                  <div className="pie-chart-wrapper">
+                    <PieChart
+                      series={[
+                        {
+                          data: dashboardData.statusDistribution,
+                          innerRadius: 60,
+                          outerRadius: 100,
+                          paddingAngle: 2,
+                          cornerRadius: 5,
+                        },
+                      ]}
+                      width={400}
+                      height={300}
+                      margin={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                    />
+                  </div>
+                ) : (
+                  <div className="chart-no-data">Pagaidām nav datu...</div>
+                )}
+              </div>
+            </Card>
+          </Col>
+        </Row>
+
+        {/* Monthly Comparison and Recent Invoices */}
         <Row gutter={[24, 24]}>
-          <Col xs={24} sm={12} lg={6}>
-            <Card
-              variant="outlined"
-              style={{
-                borderRadius: '12px',
-                border: '1px solid #e5e7eb',
-                background: '#ffffff',
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
-              styles={{ body: { padding: '24px', flex: 1, display: 'flex', flexDirection: 'column' } }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                <Text style={{ fontSize: '16px', fontWeight: 500, color: '#4b5563' }}>Kopēji ikmēneša ienākumi</Text>
-                <Text style={{ fontSize: '28px', fontWeight: 700, color: '#111827' }}>
-                  €{dashboardData.monthlyIncome.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+          <Col xs={24} lg={12}>
+            <Card className="chart-card">
+              <div className="chart-card-header">
+                <Title level={4} className="chart-card-title">
+                  Mēneša salīdzinājums
+                </Title>
+                <Text className="chart-card-subtitle">
+                  Ienākumu salīdzinājums starp pašreizējo un iepriekšējo mēnesi
                 </Text>
-                <Text style={{ fontSize: '16px', fontWeight: 500, color: incomePercent.color }}>
-                  {incomePercent.text}
-                </Text>
+              </div>
+              <div className="monthly-comparison">
+                <div className="monthly-comparison-item">
+                  <Text className="monthly-comparison-label">
+                    Pašreizējais mēnesis
+                  </Text>
+                  <div className="monthly-comparison-value-wrapper">
+                    <Text className="monthly-comparison-value">
+                      €{dashboardData.monthlyComparison.current.toFixed(2)}
+                    </Text>
+                    {dashboardData.monthlyComparison.current > dashboardData.monthlyComparison.previous && (
+                      <span className="monthly-comparison-change monthly-comparison-change-positive">
+                        <ArrowUpOutlined />
+                        {((dashboardData.monthlyComparison.current / dashboardData.monthlyComparison.previous - 1) * 100).toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="monthly-comparison-item">
+                  <Text className="monthly-comparison-label">
+                    Iepriekšējais mēnesis
+                  </Text>
+                  <div className="monthly-comparison-value-wrapper">
+                    <Text className="monthly-comparison-value">
+                      €{dashboardData.monthlyComparison.previous.toFixed(2)}
+                    </Text>
+                    {dashboardData.monthlyComparison.previous > dashboardData.monthlyComparison.current && (
+                      <span className="monthly-comparison-change monthly-comparison-change-negative">
+                        <ArrowDownOutlined />
+                        {((dashboardData.monthlyComparison.previous / dashboardData.monthlyComparison.current - 1) * 100).toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </Card>
           </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card
-              variant="outlined"
-              style={{
-                borderRadius: '12px',
-                border: '1px solid #e5e7eb',
-                background: '#ffffff',
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
-              styles={{ body: { padding: '24px', flex: 1, display: 'flex', flexDirection: 'column' } }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                <Text style={{ fontSize: '16px', fontWeight: 500, color: '#4b5563' }}>Aktīvie rēķini</Text>
-                <Text style={{ fontSize: '28px', fontWeight: 700, color: '#111827' }}>{dashboardData.activeInvoices}</Text>
-                <Text style={{ fontSize: '16px', fontWeight: 500, color: activePercent.color }}>
-                  {activePercent.text}
+          <Col xs={24} lg={12}>
+            <Card className="chart-card">
+              <div className="chart-card-header">
+                <Title level={4} className="chart-card-title">
+                  Pēdējie rēķini
+                </Title>
+                <Text className="chart-card-subtitle">
+                  Pēdējie 5 izveidotie rēķini
                 </Text>
               </div>
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card
-              variant="outlined"
-              style={{
-                borderRadius: '12px',
-                border: '1px solid #e5e7eb',
-                background: '#ffffff',
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
-              styles={{ body: { padding: '24px', flex: 1, display: 'flex', flexDirection: 'column' } }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                <Text style={{ fontSize: '16px', fontWeight: 500, color: '#4b5563' }}>Izveidotie rēķini</Text>
-                <Text style={{ fontSize: '28px', fontWeight: 700, color: '#111827' }}>{dashboardData.createdInvoices}</Text>
-                <Text style={{ fontSize: '16px', fontWeight: 500, color: createdPercent.color }}>
-                  {createdPercent.text}
-                </Text>
-              </div>
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <Card
-              variant="outlined"
-              style={{
-                borderRadius: '12px',
-                border: '1px solid #e5e7eb',
-                background: '#ffffff',
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
-              styles={{ body: { padding: '24px', flex: 1, display: 'flex', flexDirection: 'column' } }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                <Text style={{ fontSize: '16px', fontWeight: 500, color: '#4b5563' }}>Neapmaksātie rēķini</Text>
-                <Text style={{ fontSize: '28px', fontWeight: 700, color: '#111827' }}>{dashboardData.unpaidInvoices}</Text>
-                <Text style={{ fontSize: '16px', fontWeight: 500, color: unpaidPercent.color }}>
-                  {unpaidPercent.text}
-                </Text>
-              </div>
+              <Table
+                columns={invoiceColumns}
+                dataSource={dashboardData.recentInvoices}
+                pagination={false}
+                size="small"
+              />
             </Card>
           </Col>
         </Row>
-
-        {/* Charts Section */}
-        <Row gutter={[32, 32]}>
-          <Col xs={24} xl={showUserRegistrations || isEmployee ? 16 : 24}>
-            <Card
-              title={
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-                  <span style={{ fontSize: '18px', fontWeight: 600, color: '#111827' }}>Pārdošana laika gaitā</span>
-                  <Select
-                    value={selectedMonth}
-                    onChange={setSelectedMonth}
-                    style={{ width: 180 }}
-                    size="large"
-                  >
-                    <Option value="current">Pašreizējais mēnesis</Option>
-                    <Option value="last">Pēdējais mēnesis</Option>
-                    <Option value="last2">Pirms 2 mēnešiem</Option>
-                  </Select>
-                </div>
-              }
-              variant="outlined"
-              style={{
-                borderRadius: '12px',
-                border: '1px solid #e5e7eb',
-                background: '#ffffff',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
-              styles={{ body: { padding: '24px' } }}
-            >
-              <div style={{ height: '320px', position: 'relative' }}>
-                {dashboardData.salesData.length > 0 ? (
-                  <canvas ref={lineChartRef} />
-                ) : (
-                  <div
-                    style={{
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#9ca3af',
-                      fontSize: '16px',
-                      fontWeight: 500,
-                    }}
-                  >
-                    Pagaidām nav datu...
-                  </div>
-                )}
-              </div>
-            </Card>
-          </Col>
-          {showUserRegistrations && (
-            <Col xs={24} xl={8}>
-              <Card
-                title={<span style={{ fontSize: '18px', fontWeight: 600, color: '#111827' }}>Jaunu lietotāju reģistrācijas</span>}
-                variant="outlined"
-                style={{
-                  borderRadius: '12px',
-                  border: '1px solid #e5e7eb',
-                  background: '#ffffff',
-                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-                }}
-                styles={{ body: { padding: '24px' } }}
-              >
-                {dashboardData.latestUsers.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '320px', overflowY: 'auto' }}>
-                    {dashboardData.latestUsers.map((user) => (
-                      <div
-                        key={user.id}
-                        style={{
-                          padding: '16px',
-                          background: '#f9fafb',
-                          borderRadius: '8px',
-                          border: '1px solid #e5e7eb',
-                        }}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          <Text style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>
-                            {user.username || user.email}
-                          </Text>
-                          <Text style={{ fontSize: '13px', color: '#6b7280' }}>
-                            {user.email}
-                          </Text>
-                          {user.creator && (
-                            <Text style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
-                              Izveidoja: {user.creator.username || user.creator.email}
-                            </Text>
-                          )}
-                          <Text style={{ fontSize: '12px', color: '#9ca3af' }}>
-                            {formatDate(user.created_at)}
-                          </Text>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      height: '320px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#9ca3af',
-                      fontSize: '16px',
-                      fontWeight: 500,
-                    }}
-                  >
-                    Pagaidām nav datu...
-                  </div>
-                )}
-              </Card>
-            </Col>
-          )}
-          {isEmployee && (
-            <Col xs={24} xl={8}>
-              <Card
-                title={<span style={{ fontSize: '18px', fontWeight: 600, color: '#111827' }}>Rēķinu statuss</span>}
-                variant="outlined"
-                style={{
-                  borderRadius: '12px',
-                  border: '1px solid #e5e7eb',
-                  background: '#ffffff',
-                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-                }}
-                styles={{ body: { padding: '24px' } }}
-              >
-                <div style={{ height: '320px', position: 'relative' }}>
-                  {Object.values(dashboardData.invoiceStatusData).some(v => v > 0) ? (
-                    <canvas ref={pieChartRef} />
-                  ) : (
-                    <div
-                      style={{
-                        height: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#9ca3af',
-                        fontSize: '16px',
-                        fontWeight: 500,
-                      }}
-                    >
-                      Pagaidām nav datu...
-                    </div>
-                  )}
-                </div>
-              </Card>
-            </Col>
-          )}
-        </Row>
-
-        {/* Recent Invoices Table */}
-        <Card
-          title={<span style={{ fontSize: '18px', fontWeight: 600, color: '#111827' }}>Pēdējie rēķini</span>}
-          variant="outlined"
-          style={{
-            borderRadius: '12px',
-            border: '1px solid #e5e7eb',
-            background: '#ffffff',
-            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-          }}
-          styles={{ body: { padding: 0 } }}
-        >
-          <Table
-            columns={invoiceColumns}
-            dataSource={dashboardData.latestInvoices}
-            pagination={false}
-            className="custom-table"
-            locale={{
-              emptyText: 'Nav rēķinu',
-            }}
-          />
-        </Card>
       </div>
 
-      {/* Custom Table Styles */}
+      {/* Responsive Styles */}
       <style>{`
-        .custom-table .ant-table {
+        .dashboard-container {
+          padding: 16px 20px 80px;
+          max-width: 1536px;
+          margin: 0 auto;
+        }
+
+        .dashboard-header {
+          margin-bottom: 32px;
+        }
+
+        .dashboard-title {
+          margin: 0 !important;
+          font-size: 30px !important;
+          font-weight: 700 !important;
+          color: #212B36 !important;
+          line-height: 1.2 !important;
+        }
+
+        .dashboard-subtitle {
+          font-size: 16px;
+          color: #637381;
+          line-height: 1.5;
+          margin-top: 8px;
+          display: block;
+        }
+
+        /* Stat Card Styles */
+        .stat-card .ant-card-body {
+          padding: 20px;
+        }
+
+        .stat-card-content {
+          display: flex;
+          align-items: center;
+          height: 100%;
+        }
+
+        .stat-card-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .stat-card-header {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .stat-card-icon {
+          display: inline-flex;
+          height: 48px;
+          width: 48px;
+          align-items: center;
+          justify-content: center;
+          border-radius: 12px;
+          flex-shrink: 0;
+        }
+
+        .stat-card-text {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .stat-card-value {
+          font-size: 28px;
+          font-weight: 600;
+          color: #212B36;
+          margin: 0 0 4px 0;
+          line-height: 1.2;
+        }
+
+        .stat-card-meta {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .stat-card-title {
+          font-size: 14px !important;
+          color: #637381 !important;
+          margin: 0 !important;
+          line-height: 1.4;
+        }
+
+        .stat-card-change {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          border-radius: 9999px;
+          padding: 2px 10px;
           font-size: 14px;
+          font-weight: 500;
+          flex-shrink: 0;
         }
 
-        .custom-table .ant-table-thead > tr > th {
-          background: #f9fafb;
-          border-bottom: 1px solid #e5e7eb;
-          padding: 12px 24px;
+        /* Chart Card Styles */
+        .chart-card .ant-card-body {
+          padding: 20px 24px;
         }
 
-        .custom-table .ant-table-tbody > tr > td {
-          border-bottom: 1px solid #e5e7eb;
-          padding: 16px 24px;
-        }
-
-        .custom-table .ant-table-tbody > tr:last-child > td {
-          border-bottom: none;
-        }
-
-        .custom-table .ant-table-tbody > tr {
+        .chart-card {
+          border-radius: 16px;
+          border: 1px solid #e2e8f0;
           background: #ffffff;
+          box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
         }
 
-        .custom-table .ant-table-tbody > tr:hover > td {
-          background: #f9fafb;
+        .chart-card-header {
+          margin-bottom: 20px;
+        }
+
+        .chart-card-title {
+          margin: 0 !important;
+          font-size: 18px !important;
+          font-weight: 600 !important;
+          color: #212B36 !important;
+        }
+
+        .chart-card-subtitle {
+          font-size: 14px;
+          color: #637381;
+          margin-top: 4px;
+          display: block;
+        }
+
+        .chart-card-content {
+          height: 300px;
+          position: relative;
+          width: 100%;
+          overflow: hidden;
+        }
+
+        .chart-card-content-center {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .pie-chart-wrapper {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+        }
+
+        .chart-no-data {
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #9ca3af;
+          font-size: 16px;
+          font-weight: 500;
+        }
+
+        /* Monthly Comparison */
+        .monthly-comparison {
+          display: flex;
+          gap: 32px;
+          flex-wrap: wrap;
+        }
+
+        .monthly-comparison-item {
+          flex: 1;
+          min-width: 200px;
+        }
+
+        .monthly-comparison-label {
+          font-size: 14px;
+          color: #637381;
+          display: block;
+          margin-bottom: 8px;
+        }
+
+        .monthly-comparison-value-wrapper {
+          display: flex;
+          align-items: baseline;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .monthly-comparison-value {
+          font-size: 32px !important;
+          font-weight: 700 !important;
+          color: #212B36 !important;
+        }
+
+        .monthly-comparison-change {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 14px;
+          font-weight: 500;
+        }
+
+        .monthly-comparison-change-positive {
+          color: #12b76a;
+        }
+
+        .monthly-comparison-change-negative {
+          color: #ef4444;
+        }
+
+        /* Mobile Responsive (< 576px) */
+        @media (max-width: 575px) {
+          .dashboard-container {
+            padding: 12px 16px 60px;
+          }
+
+          .dashboard-header {
+            margin-bottom: 24px;
+          }
+
+          .dashboard-title {
+            font-size: 24px !important;
+          }
+
+          .dashboard-subtitle {
+            font-size: 14px;
+          }
+
+          .stat-card .ant-card-body {
+            padding: 16px;
+          }
+
+          .stat-card-header {
+            gap: 12px;
+          }
+
+          .stat-card-icon {
+            height: 44px;
+            width: 44px;
+          }
+
+          .stat-card-value {
+            font-size: 24px;
+          }
+
+          .stat-card-title {
+            font-size: 13px !important;
+          }
+
+          .stat-card-change {
+            font-size: 12px;
+            padding: 2px 8px;
+          }
+
+          .chart-card .ant-card-body {
+            padding: 16px;
+          }
+
+          .chart-card-header {
+            margin-bottom: 16px;
+          }
+
+          .chart-card-title {
+            font-size: 16px !important;
+          }
+
+          .chart-card-subtitle {
+            font-size: 12px;
+          }
+
+          .chart-card-content {
+            height: 250px;
+          }
+
+          .pie-chart-wrapper svg {
+            max-width: 100% !important;
+            height: auto !important;
+          }
+
+          .chart-no-data {
+            font-size: 14px;
+          }
+
+          .monthly-comparison {
+            gap: 16px;
+          }
+
+          .monthly-comparison-item {
+            min-width: 100%;
+          }
+
+          .monthly-comparison-value {
+            font-size: 24px !important;
+          }
+        }
+
+        /* Tablet Responsive (576px - 991px) */
+        @media (min-width: 576px) and (max-width: 991px) {
+          .stat-card-value {
+            font-size: 26px;
+          }
+
+          .chart-card-content {
+            height: 280px;
+          }
+
+          .pie-chart-wrapper {
+            max-width: 350px;
+            margin: 0 auto;
+          }
+
+          .monthly-comparison-value {
+            font-size: 28px !important;
+          }
+        }
+
+        /* Small Laptop (992px - 1279px) */
+        @media (min-width: 992px) and (max-width: 1279px) {
+          .stat-card-value {
+            font-size: 27px;
+          }
         }
       `}</style>
     </DashboardLayout>

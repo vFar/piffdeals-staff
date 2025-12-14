@@ -1,107 +1,65 @@
-import { useState, useEffect } from 'react';
+import { useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { db } from '../lib/supabase';
 
 /**
  * Custom hook for managing user roles and permissions
+ * OPTIMIZED: Uses AuthContext userProfile directly to avoid duplicate fetches
  * @returns {Object} User profile, role checks, and status
  */
 export const useUserRole = () => {
-  const { currentUser } = useAuth();
-  const [userProfile, setUserProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [initialLoad, setInitialLoad] = useState(true); // Track initial load separately
-
-  useEffect(() => {
-    if (currentUser) {
-      loadProfile();
-    } else {
-      setUserProfile(null);
-      setLoading(false);
-      setInitialLoad(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser]);
-
-  const loadProfile = async () => {
-    // Only show loading on initial load, not on refreshes
-    if (initialLoad) {
-      setLoading(true);
-    }
-    
-    try {
-      const profile = await db.getById('user_profiles', currentUser.id);
-      setUserProfile(profile);
-    } catch (error) {
-      setUserProfile(null);
-    } finally {
-      if (initialLoad) {
-        setLoading(false);
-        setInitialLoad(false); // Mark initial load as complete
-      }
-    }
-  };
+  const { userProfile, loading } = useAuth();
 
   /**
    * Check if user has a specific role
    * @param {string} role - Role to check ('employee', 'admin', 'super_admin')
    * @returns {boolean}
    */
-  const hasRole = (role) => userProfile?.role === role;
+  const hasRole = useMemo(() => (role) => userProfile?.role === role, [userProfile?.role]);
 
   /**
    * Check if user has any of the specified roles
    * @param {string[]} roles - Array of roles to check
    * @returns {boolean}
    */
-  const hasAnyRole = (roles) => roles.includes(userProfile?.role);
+  const hasAnyRole = useMemo(() => (roles) => roles.includes(userProfile?.role), [userProfile?.role]);
 
   /**
    * Check if user is admin or super_admin
    * @returns {boolean}
    */
-  const isAdmin = hasAnyRole(['admin', 'super_admin']);
+  const isAdmin = useMemo(() => ['admin', 'super_admin'].includes(userProfile?.role), [userProfile?.role]);
 
   /**
    * Check if user is super_admin
    * @returns {boolean}
    */
-  const isSuperAdmin = hasRole('super_admin');
+  const isSuperAdmin = useMemo(() => userProfile?.role === 'super_admin', [userProfile?.role]);
 
   /**
    * Check if user is employee
    * @returns {boolean}
    */
-  const isEmployee = hasRole('employee');
+  const isEmployee = useMemo(() => userProfile?.role === 'employee', [userProfile?.role]);
 
   /**
    * Check if user status is active
    * @returns {boolean}
    */
-  const isActive = userProfile?.status === 'active';
+  const isActive = useMemo(() => userProfile?.status === 'active', [userProfile?.status]);
 
   /**
    * Check if user status is inactive
    * @returns {boolean}
    */
-  const isInactive = userProfile?.status === 'inactive';
+  const isInactive = useMemo(() => userProfile?.status === 'inactive', [userProfile?.status]);
 
   /**
    * Check if user status is suspended
    * @returns {boolean}
    */
-  const isSuspended = userProfile?.status === 'suspended';
+  const isSuspended = useMemo(() => userProfile?.status === 'suspended', [userProfile?.status]);
 
-  /**
-   * Reload user profile from database
-   */
-  const refreshProfile = () => {
-    if (currentUser) {
-      loadProfile();
-    }
-  };
-
-  return {
+  return useMemo(() => ({
     // Profile data
     userProfile,
     loading,
@@ -124,9 +82,17 @@ export const useUserRole = () => {
     username: userProfile?.username,
     fullName: userProfile?.full_name,
     email: userProfile?.email,
-
-    // Utilities
-    refreshProfile,
-  };
+  }), [
+    userProfile,
+    loading,
+    hasRole,
+    hasAnyRole,
+    isAdmin,
+    isSuperAdmin,
+    isEmployee,
+    isActive,
+    isInactive,
+    isSuspended,
+  ]);
 };
 
