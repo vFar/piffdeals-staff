@@ -1,8 +1,7 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { useUserRole } from '../hooks/useUserRole';
-import { message } from 'antd';
 
 const InvoiceDataContext = createContext(undefined);
 
@@ -25,8 +24,7 @@ export const InvoiceDataProvider = ({ children }) => {
   
   // Cache duration: 30 seconds (stale-while-revalidate pattern)
   const CACHE_DURATION = 30000;
-  const isFetchingRef = useRef(false);
-  const subscriptionRef = useRef(null);
+  const isFetchingRef = { current: false };
 
   /**
    * Fetch invoices from database
@@ -146,89 +144,6 @@ export const InvoiceDataProvider = ({ children }) => {
       fetchInvoices();
     }
   }, [userProfile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Set up real-time subscription for invoice updates
-  useEffect(() => {
-    if (!userProfile?.id) return;
-
-    // Clean up existing subscription
-    if (subscriptionRef.current) {
-      subscriptionRef.current.unsubscribe();
-    }
-
-    console.log('📊 Setting up realtime subscription for invoice data updates...');
-
-    // Subscribe to invoice changes
-    const subscription = supabase
-      .channel('invoice-data-updates')
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
-          schema: 'public',
-          table: 'invoices',
-        },
-        (payload) => {
-          console.log('📊 Invoice data event received:', {
-            event: payload.eventType,
-            invoiceNumber: payload.new?.invoice_number || payload.old?.invoice_number,
-            oldStatus: payload.old?.status,
-            newStatus: payload.new?.status,
-          });
-
-          const eventType = payload.eventType;
-          const newInvoice = payload.new;
-          const oldInvoice = payload.old;
-
-          // Show user-friendly messages for important events
-          if (eventType === 'UPDATE' && newInvoice && oldInvoice) {
-            // Invoice status changed to paid
-            if (newInvoice.status === 'paid' && oldInvoice.status !== 'paid') {
-              const isOwnInvoice = newInvoice.user_id === userProfile.id;
-              if (isOwnInvoice || isAdmin || isSuperAdmin) {
-                console.log('💰 Showing paid invoice message...');
-                message.success({
-                  content: `Rēķins ${newInvoice.invoice_number} ir apmaksāts! €${parseFloat(newInvoice.total || 0).toFixed(2)}`,
-                  duration: 5,
-                });
-              }
-            }
-            
-            // Invoice status changed to overdue
-            if (newInvoice.status === 'overdue' && oldInvoice.status !== 'overdue') {
-              const isOwnInvoice = newInvoice.user_id === userProfile.id;
-              if (isOwnInvoice || isAdmin || isSuperAdmin) {
-                console.log('⚠️ Showing overdue invoice message...');
-                message.warning({
-                  content: `Rēķins ${newInvoice.invoice_number} ir kavēts!`,
-                  duration: 5,
-                });
-              }
-            }
-          }
-
-          // Refresh data when changes occur
-          // Use a small delay to batch rapid changes
-          console.log('🔄 Refreshing invoice data...');
-          setTimeout(() => {
-            fetchInvoices(true);
-          }, 500);
-        }
-      )
-      .subscribe((status) => {
-        console.log('🔌 Invoice data subscription status:', status);
-      });
-
-    subscriptionRef.current = subscription;
-
-    return () => {
-      if (subscriptionRef.current) {
-        console.log('🔌 Unsubscribing from invoice data updates...');
-        subscriptionRef.current.unsubscribe();
-        subscriptionRef.current = null;
-      }
-    };
-  }, [userProfile?.id, isAdmin, isSuperAdmin, fetchInvoices]);
 
   const value = {
     // Data

@@ -1257,15 +1257,6 @@ const CreateInvoice = ({ mode = 'create' }) => {
                 </Form.Item>
               </div>
 
-              {/* Important Notice */}
-              <Alert
-                message="Svarīgi: Automātiskie atgādinājuma e-pasti"
-                description="Automātiskie atgādinājuma e-pasti tiks nosūtīti klientiem tikai tad, ja rēķins ir nosūtīts klientam caur e-pastu vai atzīmēts kā 'nosūtīts klientam'. Ja rēķins nav nosūtīts, automātiskie atgādinājumi nedarbosies."
-                type="info"
-                showIcon
-                style={{ marginBottom: 24, fontSize: '13px' }}
-                icon={<InfoCircleOutlined />}
-              />
 
               {/* Action Buttons */}
               <div className="action-buttons">

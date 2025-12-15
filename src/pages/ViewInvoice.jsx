@@ -1376,17 +1376,6 @@ const ViewInvoice = () => {
                 </div>
               </div>
 
-              {/* Customer Notification Warning */}
-              {!invoice?.sent_at && invoice?.status !== 'draft' && (
-                <Alert
-                  message="Klients nav informēts"
-                  description="Šis rēķins nav nosūtīts klientam. Automātiskie atgādinājuma e-pasti nedarbosies, līdz rēķins tiks nosūtīts vai atzīmēts kā 'nosūtīts klientam'."
-                  type="warning"
-                  showIcon
-                  style={{ marginBottom: 24, fontSize: '13px' }}
-                  icon={<WarningOutlined />}
-                />
-              )}
 
               <Divider />
 

@@ -27,7 +27,6 @@ const Invoices = () => {
   const [shareMethodModal, setShareMethodModal] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [lastEmailSent, setLastEmailSent] = useState(null);
   const [emailCooldown, setEmailCooldown] = useState(0);
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
   const { notifyEmailSendFailed, notifyInvoicePaid } = useNotifications();
@@ -113,6 +112,41 @@ const Invoices = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoices, shareMethodModal]);
+
+  // Calculate cooldown from selectedInvoice.last_invoice_email_sent
+  useEffect(() => {
+    if (selectedInvoice?.last_invoice_email_sent) {
+      const lastSent = new Date(selectedInvoice.last_invoice_email_sent);
+      const now = new Date();
+      const timeSinceLastSent = now.getTime() - lastSent.getTime();
+      const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+      
+      if (timeSinceLastSent < COOLDOWN_MS) {
+        const remaining = Math.ceil((COOLDOWN_MS - timeSinceLastSent) / 1000);
+        setEmailCooldown(remaining);
+      } else {
+        setEmailCooldown(0);
+      }
+    } else {
+      setEmailCooldown(0);
+    }
+  }, [selectedInvoice?.last_invoice_email_sent]);
+
+  // Update cooldown timer every second
+  useEffect(() => {
+    if (emailCooldown > 0) {
+      const timer = setInterval(() => {
+        setEmailCooldown((prev) => {
+          if (prev <= 1) {
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    }
+  }, [emailCooldown]);
 
   const fetchInvoices = async () => {
     try {
@@ -256,8 +290,39 @@ const Invoices = () => {
   };
 
   const handleResendInvoice = async (invoice) => {
+    // Show modal immediately with cached data
     setSelectedInvoice(invoice);
     setShareMethodModal(true);
+    
+    // Fetch fresh invoice data in background to get latest last_invoice_email_sent
+    // This updates the cooldown without blocking the modal from opening
+    try {
+      const { data: freshInvoice, error } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', invoice.id)
+        .single();
+      
+      if (!error && freshInvoice) {
+        // Enrich with creator info if available
+        if (freshInvoice.user_id) {
+          const { data: creatorData } = await supabase
+            .from('user_profiles')
+            .select('id, username, email, role')
+            .eq('id', freshInvoice.user_id)
+            .maybeSingle();
+          
+          if (creatorData) {
+            freshInvoice.creator = creatorData;
+          }
+        }
+        // Update with fresh data (this will trigger cooldown recalculation)
+        setSelectedInvoice(freshInvoice);
+      }
+    } catch (error) {
+      console.error('Failed to fetch fresh invoice data:', error);
+      // Modal is already open with cached data, so this is non-critical
+    }
   };
 
   const handleSendEmailResend = async () => {
@@ -483,22 +548,28 @@ const Invoices = () => {
         }
       }
 
-      // Update last email sent time
-      setLastEmailSent(Date.now());
-      
-      // Set cooldown to 10 minutes (600 seconds)
-      setEmailCooldown(600);
-      
-      // Update cooldown every second
-      const cooldownInterval = setInterval(() => {
-        setEmailCooldown((prev) => {
-          if (prev <= 1) {
-            clearInterval(cooldownInterval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+      // Fetch updated invoice data to get the latest last_invoice_email_sent timestamp
+      try {
+        const { data: updatedInvoice } = await supabase
+          .from('invoices')
+          .select('*')
+          .eq('id', invoiceId)
+          .single();
+        
+        if (updatedInvoice) {
+          // Update selectedInvoice with fresh data including last_invoice_email_sent
+          setSelectedInvoice(updatedInvoice);
+          // Also update in invoices list
+          setInvoices(prev => prev.map(inv => 
+            inv.id === invoiceId ? updatedInvoice : inv
+          ));
+          setFilteredInvoices(prev => prev.map(inv => 
+            inv.id === invoiceId ? updatedInvoice : inv
+          ));
+        }
+      } catch (fetchError) {
+        console.error('Failed to fetch updated invoice:', fetchError);
+      }
       
       // Close loading message and show success
       message.destroy('sending-email');
@@ -519,32 +590,34 @@ const Invoices = () => {
       
       // Handle specific error types with user-friendly messages
       if (error?.status === 429 || error?.message?.includes('Cooldown') || error?.message?.includes('wait') || error?.message?.includes('uzgaidiet') || error?.errorType === 'cooldown') {
-        // Try to extract cooldown from error message or response
-        let cooldownSeconds = 600; // Default 10 minutes
-        
-        // Try to extract from error message
-        const cooldownMatch = error?.message?.match(/(\d+)\s*minute/i);
-        if (cooldownMatch) {
-          cooldownSeconds = parseInt(cooldownMatch[1]) * 60;
+        // Fetch updated invoice to get the latest last_invoice_email_sent timestamp
+        try {
+          const { data: updatedInvoice } = await supabase
+            .from('invoices')
+            .select('*')
+            .eq('id', invoiceId)
+            .single();
+          
+          if (updatedInvoice) {
+            // Update selectedInvoice with fresh data including last_invoice_email_sent
+            setSelectedInvoice(updatedInvoice);
+            // Also update in invoices list
+            setInvoices(prev => prev.map(inv => 
+              inv.id === invoiceId ? updatedInvoice : inv
+            ));
+            setFilteredInvoices(prev => prev.map(inv => 
+              inv.id === invoiceId ? updatedInvoice : inv
+            ));
+          }
+        } catch (fetchError) {
+          console.error('Failed to fetch updated invoice after cooldown:', fetchError);
         }
         
-        // Try to extract from error context/body
+        // Try to extract cooldown from error response
+        let cooldownSeconds = 600; // Default 10 minutes
         if (error?.cooldownRemaining) {
           cooldownSeconds = error.cooldownRemaining;
         }
-        
-        setEmailCooldown(cooldownSeconds);
-        
-        // Update cooldown every second
-        const cooldownInterval = setInterval(() => {
-          setEmailCooldown((prev) => {
-            if (prev <= 1) {
-              clearInterval(cooldownInterval);
-              return 0;
-            }
-            return prev - 1;
-          });
-        }, 1000);
         
         const minutes = Math.ceil(cooldownSeconds / 60);
         errorMessage = `Lūdzu, uzgaidiet ${minutes} minūte(s) pirms nākamās sūtīšanas`;
@@ -831,7 +904,11 @@ const Invoices = () => {
       key: 'customer_name',
       sorter: (a, b) => (a.customer_name || '').localeCompare(b.customer_name || ''),
       sortDirections: ['ascend', 'descend'],
-      render: (text) => <Text style={{ color: '#111827' }}>{text}</Text>,
+      render: (text, record) => (
+        <Tooltip title={record.customer_email || 'Nav norādīts e-pasts'} placement="top">
+          <Text style={{ color: '#111827', cursor: 'help' }}>{text}</Text>
+        </Tooltip>
+      ),
     },
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Izsniegšanas datums</span>,
@@ -1562,7 +1639,7 @@ const Invoices = () => {
                     }}
                   >
                     {emailCooldown > 0
-                      ? `Lūdzu, uzgaidiet ${Math.ceil(emailCooldown / 60)} min`
+                      ? `Atlikušas ${Math.floor(emailCooldown / 60)}:${(emailCooldown % 60).toString().padStart(2, '0')}`
                       : 'Nosūtīt e-pastu'}
                   </Button>
                 </Popconfirm>
@@ -1573,7 +1650,7 @@ const Invoices = () => {
                     color: '#6b7280',
                     textAlign: 'center'
                   }}>
-                    Atkārtota sūtīšana pieejama pēc {Math.ceil(emailCooldown / 60)} minūtēm
+                    Atkārtota sūtīšana pieejama pēc {Math.floor(emailCooldown / 60)}:{(emailCooldown % 60).toString().padStart(2, '0')}
                   </div>
                 )}
               </div>

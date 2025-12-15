@@ -521,3 +521,5 @@ Test ID;Test Case;Category;Subcategory;Input Data;Expected Output;Test Steps;Res
 520;InvoiceDataContext - performance with 100+ invoices;Frontend;Performance;Data Management;100+ invoices;Data fetches and updates perform well;Test with 100+ invoices;;;;
 521;InvoiceDataContext - performance with 500+ invoices;Frontend;Performance;Data Management;500+ invoices;Data fetches and updates perform well;Test with 500+ invoices;;;;
 
+
+

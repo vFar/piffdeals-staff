@@ -574,55 +574,6 @@ export const NotificationProvider = ({ children }) => {
     }
   }, [userProfile, checkDailyDigest]);
 
-  // Subscribe to real-time invoice updates
-  useEffect(() => {
-    if (!currentUser) return;
-
-    console.log('🔔 Setting up realtime subscription for invoice notifications...');
-
-    const subscription = supabase
-      .channel('invoice-notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'invoices',
-        },
-        (payload) => {
-          console.log('📨 Realtime event received:', {
-            event: payload.eventType,
-            invoiceNumber: payload.new?.invoice_number,
-            oldStatus: payload.old?.status,
-            newStatus: payload.new?.status,
-          });
-
-          const invoice = payload.new;
-          const oldInvoice = payload.old;
-
-          // Invoice paid notification
-          if (invoice.status === 'paid' && oldInvoice.status !== 'paid') {
-            console.log('✅ Invoice paid! Showing notification...');
-            notifyInvoicePaid(invoice, invoice.payment_method || '');
-          }
-
-          // Stock update failed notification
-          if (invoice.stock_update_status === 'failed') {
-            console.log('❌ Stock update failed! Showing notification...');
-            notifyStockUpdateFailed(invoice);
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log('🔌 Realtime subscription status:', status);
-      });
-
-    return () => {
-      console.log('🔌 Unsubscribing from realtime...');
-      subscription.unsubscribe();
-    };
-  }, [currentUser, notifyInvoicePaid, notifyStockUpdateFailed]);
-
   const value = {
     notifications,
     unreadCount,

@@ -212,6 +212,56 @@ const PublicInvoice = () => {
         }
       `}</style>
 
+      {/* Overdue Alert - Hidden on print */}
+      {invoice?.status === 'overdue' && (
+        <div className="no-print" style={{ 
+          maxWidth: 900,
+          margin: '24px auto 0',
+          padding: '0 48px'
+        }}>
+          <div style={{
+            background: '#fef2f2',
+            border: '2px solid #ef4444',
+            borderRadius: '8px',
+            padding: '16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
+          }}>
+            <svg 
+              style={{ width: 24, height: 24, color: '#ef4444', flexShrink: 0 }}
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" 
+              />
+            </svg>
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontSize: '16px', 
+                fontWeight: 600, 
+                color: '#991b1b',
+                marginBottom: '4px'
+              }}>
+                Rēķins ir kavēts
+              </div>
+              <div style={{ 
+                fontSize: '14px', 
+                color: '#7f1d1d',
+                lineHeight: 1.5
+              }}>
+                Apmaksas termiņš ir beidzies. Lūdzu, veiciet apmaksu pēc iespējas ātrāk, lai izvairītos no papildu maksām.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Action Buttons - Hidden on print */}
       <div className="no-print" style={{ 
         maxWidth: 900,
@@ -227,9 +277,12 @@ const PublicInvoice = () => {
             icon={<CreditCardOutlined />}
             onClick={handlePayInvoice}
             size="large"
-            style={{ background: '#10b981', borderColor: '#10b981' }}
+            style={{ 
+              background: invoice?.status === 'overdue' ? '#ef4444' : '#10b981', 
+              borderColor: invoice?.status === 'overdue' ? '#ef4444' : '#10b981' 
+            }}
           >
-            Apmaksāt rēķinu
+            {invoice?.status === 'overdue' ? 'Apmaksāt kavēto rēķinu' : 'Apmaksāt rēķinu'}
           </Button>
         )}
       </div>
@@ -253,6 +306,26 @@ const PublicInvoice = () => {
             userSelect: 'none',
           }}>
             APMAKSĀTS
+          </div>
+        )}
+        
+        {/* Overdue Watermark */}
+        {invoice.status === 'overdue' && (
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%) rotate(-45deg)',
+            fontSize: '72px',
+            fontWeight: 700,
+            color: 'rgba(239, 68, 68, 0.15)', // Light red
+            pointerEvents: 'none',
+            zIndex: 1000,
+            whiteSpace: 'nowrap',
+            textShadow: '2px 2px 4px rgba(0,0,0,0.1)',
+            userSelect: 'none',
+          }}>
+            KAVĒTS
           </div>
         )}
         
@@ -292,12 +365,36 @@ const PublicInvoice = () => {
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 14, color: '#6b7280' }}>
               <div><strong>Rēķina datums:</strong> {dayjs(invoice.issue_date).format('DD.MM.YYYY')}</div>
-              <div style={{ marginTop: 4 }}>
+              <div style={{ 
+                marginTop: 4,
+                color: invoice.status === 'overdue' ? '#ef4444' : '#6b7280',
+                fontWeight: invoice.status === 'overdue' ? 600 : 400
+              }}>
                 <strong>Apmaksas termiņš:</strong> {dayjs(invoice.due_date).format('DD.MM.YYYY')}
+                {invoice.status === 'overdue' && (
+                  <span style={{ 
+                    marginLeft: 8,
+                    fontSize: '12px',
+                    background: '#fef2f2',
+                    color: '#991b1b',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontWeight: 600
+                  }}>
+                    NOKAVĒTS
+                  </span>
+                )}
               </div>
-              <div style={{ marginTop: 8, fontSize: '13px', color: '#ef4444', fontWeight: 500 }}>
-                Apmaksa jāveic 5 dienu laikā
-              </div>
+              {invoice.status !== 'overdue' && (
+                <div style={{ marginTop: 8, fontSize: '13px', color: '#ef4444', fontWeight: 500 }}>
+                  Apmaksa jāveic 5 dienu laikā
+                </div>
+              )}
+              {invoice.status === 'overdue' && (
+                <div style={{ marginTop: 8, fontSize: '13px', color: '#ef4444', fontWeight: 600 }}>
+                  Apmaksas termiņš ir beidzies
+                </div>
+              )}
             </div>
           </div>
         </div>

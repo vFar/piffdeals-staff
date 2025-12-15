@@ -263,13 +263,137 @@ serve(async (req) => {
       );
     }
 
-    const logoImageUrl = `${publicSiteUrl}/images/S-3.png`;
-    const textLogoUrl = `${publicSiteUrl}/images/piffdeals_logo_text_primary.svg`;
+    // Generate public image URLs
+    // Ensure no trailing slash in base URL
+    // Default to production domain if not set
+    const finalSiteUrl = (Deno.env.get('PUBLIC_SITE_URL') || 'https://staff.piffdeals.lv').replace(/\/$/, '');
     
-    // Use URLs directly for faster response (images will load from email client)
-    // Skip base64 conversion to make response instant
+    // Warn if using localhost (Edge Functions can't access localhost)
+    if (finalSiteUrl.includes('localhost') || finalSiteUrl.includes('127.0.0.1')) {
+      console.warn('WARNING: PUBLIC_SITE_URL appears to be localhost. Edge Functions cannot access localhost URLs. Images may not load.');
+      console.warn('Consider setting PUBLIC_SITE_URL to https://staff.piffdeals.lv in Edge Function secrets');
+    }
+    
+    // Ensure HTTPS is used for production (unless explicitly localhost)
+    const secureSiteUrl = finalSiteUrl.startsWith('http://localhost') 
+      ? finalSiteUrl 
+      : finalSiteUrl.replace(/^http:/, 'https:');
+    
+    const logoImageUrl = `${secureSiteUrl}/images/S-3.png`;
+    const textLogoAccentUrl = `${secureSiteUrl}/images/piffdeals_text_accent.png`;
+    const textLogoPrimaryUrl = `${secureSiteUrl}/images/piffdeals_text_primary.png`;
+    
+    console.log('Using site URL:', secureSiteUrl);
+    console.log('Image URLs to fetch:', { logoImageUrl, textLogoAccentUrl, textLogoPrimaryUrl });
+    
+    // Fetch images and convert to base64 for embedding in email
+    // This ensures images display in all email clients without requiring external access
+    let logoBase64 = '';
+    let textLogoAccentBase64 = '';
+    let textLogoPrimaryBase64 = '';
+    
+    // Helper function to convert ArrayBuffer to base64
+    const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    };
+    
+    // Helper function to fetch and convert PNG to base64
+    const fetchPngAsBase64 = async (url: string, imageName: string): Promise<string> => {
+      try {
+        console.log(`Fetching ${imageName} from: ${url}`);
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'image/png,image/*,*/*',
+          },
+        });
+        
+        console.log(`${imageName} response status: ${response.status} ${response.statusText}`);
+        
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+          const base64String = arrayBufferToBase64(buffer);
+          const dataUri = `data:image/png;base64,${base64String}`;
+          console.log(`${imageName} successfully converted to base64 (${dataUri.length} chars)`);
+          return dataUri;
+        } else {
+          const errorText = await response.text().catch(() => 'Unable to read error response');
+          console.error(`Failed to fetch ${imageName}: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`);
+        }
+      } catch (error) {
+        console.error(`Error fetching ${imageName} from ${url}:`, error);
+      }
+      return '';
+    };
+    
+    // Fetch all images in parallel
+    console.log('Starting image fetch for:', { logoImageUrl, textLogoAccentUrl, textLogoPrimaryUrl });
+    const [logoBase64Result, textLogoAccentBase64Result, textLogoPrimaryBase64Result] = await Promise.all([
+      fetchPngAsBase64(logoImageUrl, 'S-3.png'),
+      fetchPngAsBase64(textLogoAccentUrl, 'piffdeals_text_accent.png'),
+      fetchPngAsBase64(textLogoPrimaryUrl, 'piffdeals_text_primary.png'),
+    ]);
+    
+    logoBase64 = logoBase64Result;
+    textLogoAccentBase64 = textLogoAccentBase64Result;
+    textLogoPrimaryBase64 = textLogoPrimaryBase64Result;
+    
+    console.log('Image fetch results:', {
+      logoLoaded: !!logoBase64,
+      accentLoaded: !!textLogoAccentBase64,
+      primaryLoaded: !!textLogoPrimaryBase64,
+    });
+    
+    // Use the HTTP URLs directly - these should work in emails
     const finalLogoUrl = logoImageUrl;
-    const finalTextLogoUrl = textLogoUrl;
+    const finalTextLogoAccentUrl = textLogoAccentUrl;
+    const finalTextLogoPrimaryUrl = textLogoPrimaryUrl;
+    
+    // Ensure URLs are never empty and are valid
+    if (!finalLogoUrl || finalLogoUrl.trim() === '' ||
+        !finalTextLogoAccentUrl || finalTextLogoAccentUrl.trim() === '' ||
+        !finalTextLogoPrimaryUrl || finalTextLogoPrimaryUrl.trim() === '') {
+      console.error('CRITICAL ERROR: Image URLs are empty!', {
+        logoImageUrl,
+        textLogoAccentUrl,
+        textLogoPrimaryUrl,
+        secureSiteUrl,
+      });
+      throw new Error(`Image URLs are invalid: logo=${!!finalLogoUrl}, accent=${!!finalTextLogoAccentUrl}, primary=${!!finalTextLogoPrimaryUrl}`);
+    }
+    
+    // Validate URLs are properly formatted
+    if (!finalLogoUrl.startsWith('http://') && !finalLogoUrl.startsWith('https://')) {
+      throw new Error(`Invalid logo URL format: ${finalLogoUrl}`);
+    }
+    if (!finalTextLogoAccentUrl.startsWith('http://') && !finalTextLogoAccentUrl.startsWith('https://')) {
+      throw new Error(`Invalid accent URL format: ${finalTextLogoAccentUrl}`);
+    }
+    if (!finalTextLogoPrimaryUrl.startsWith('http://') && !finalTextLogoPrimaryUrl.startsWith('https://')) {
+      throw new Error(`Invalid primary URL format: ${finalTextLogoPrimaryUrl}`);
+    }
+    
+    console.log('Using image URLs for email:', {
+      logo: finalLogoUrl,
+      accent: finalTextLogoAccentUrl,
+      primary: finalTextLogoPrimaryUrl,
+    });
+    
+    // Quick test: Try to fetch the accent image to verify it's accessible
+    try {
+      const accentTestResponse = await fetch(finalTextLogoAccentUrl, { method: 'HEAD' });
+      console.log(`Accent image accessibility test: ${accentTestResponse.status} ${accentTestResponse.statusText}`);
+      if (!accentTestResponse.ok) {
+        console.warn(`WARNING: Accent image may not be accessible at ${finalTextLogoAccentUrl}`);
+      }
+    } catch (error) {
+      console.warn(`WARNING: Could not verify accent image accessibility:`, error);
+    }
 
     // Get email configuration
     const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
@@ -316,11 +440,13 @@ serve(async (req) => {
                   <td align="center" style="padding: 0;">
                     <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
                       <tr>
+                        <!-- Logo Image (S-3.png) -->
                         <td align="center" valign="middle" style="padding-right: 12px;">
-                          <img src="${finalLogoUrl}" alt="${COMPANY_NAME} Logo" width="40" height="40" style="width: 40px; height: 40px; display: block; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
+                          <img src="${finalLogoUrl || 'https://staff.piffdeals.lv/images/S-3.png'}" alt="${COMPANY_NAME} Logo" width="40" height="40" style="width: 40px; height: 40px; display: block; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
                         </td>
+                        <!-- Text Logo Accent PNG -->
                         <td align="left" valign="middle">
-                          <img src="${finalTextLogoUrl}" alt="${COMPANY_NAME}" width="auto" height="24" style="height: 24px; width: auto; display: block; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
+                          <img src="${finalTextLogoAccentUrl || 'https://staff.piffdeals.lv/images/piffdeals_text_accent.png'}" alt="${COMPANY_NAME}" width="auto" height="24" style="height: 24px; width: auto; display: block; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
                         </td>
                       </tr>
                     </table>
@@ -400,7 +526,8 @@ serve(async (req) => {
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
                 <tr>
                   <td align="center" style="padding-bottom: 16px;">
-                    <img src="${finalTextLogoUrl}" alt="${COMPANY_NAME}" width="auto" height="24" style="height: 24px; width: auto; display: block; margin: 0 auto; opacity: 0.7; max-width: 180px; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
+                    <!-- Text Logo Primary PNG in Footer -->
+                    <img src="${finalTextLogoPrimaryUrl || 'https://staff.piffdeals.lv/images/piffdeals_text_primary.png'}" alt="${COMPANY_NAME}" width="auto" height="24" style="height: 24px; width: auto; display: block; margin: 0 auto; opacity: 0.7; max-width: 180px; border: none; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic;" />
                   </td>
                 </tr>
                 <tr>

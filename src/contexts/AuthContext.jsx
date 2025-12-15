@@ -93,9 +93,24 @@ export const AuthProvider = ({ children }) => {
    * Sign out
    */
   const signOut = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    setUserProfile(null);
+    try {
+      // Use local scope to avoid 403 errors with proxy
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) {
+        console.error('Sign out error:', error);
+        // Even if there's an error, clear local state
+      }
+    } catch (err) {
+      console.error('Sign out exception:', err);
+      // Continue with local cleanup even if API call fails
+    } finally {
+      // Always clear local state
+      setUserProfile(null);
+      setCurrentUser(null);
+      // Clear local storage
+      localStorage.clear();
+      sessionStorage.clear();
+    }
   }, []);
 
   /**
