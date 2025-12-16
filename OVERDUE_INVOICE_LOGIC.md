@@ -259,3 +259,4 @@ This is handled by the `mark-overdue-invoices` Edge Function (cron job).
 The implemented logic prioritizes **getting paid** over punishing late customers. By keeping payment enabled and the invoice accessible, we maximize the chance of receiving payment while clearly communicating the overdue status through multiple visual indicators.
 
 
+

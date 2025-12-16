@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import RoleRoute from './components/RoleRoute';
 import SessionTimeoutNotifier from './components/SessionTimeoutNotifier';
+import SessionTerminatedNotifier from './components/SessionTerminatedNotifier';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
@@ -22,6 +23,7 @@ function App() {
   return (
     <>
       <SessionTimeoutNotifier />
+      <SessionTerminatedNotifier />
       <Routes>
       {/* Public Routes */}
       <Route path="/login" element={<Login />} />
