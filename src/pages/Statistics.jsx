@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, Typography, Spin } from 'antd';
-import { LineChart } from '@mui/x-charts';
+import { LineChart, BarChart } from '@mui/x-charts';
+import { StopOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { useUserRole } from '../hooks/useUserRole';
 import { supabase } from '../lib/supabase';
@@ -11,11 +12,20 @@ const Statistics = () => {
   const { userProfile, isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
   const [loading, setLoading] = useState(true);
   const [timePeriod, setTimePeriod] = useState('monthly');
+  const [blacklistTimePeriod, setBlacklistTimePeriod] = useState('monthly');
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   
   const [statisticsData, setStatisticsData] = useState({
     sales: [],
     revenue: [],
+  });
+  
+  const [blacklistData, setBlacklistData] = useState({
+    weekly: [],
+    monthly: [],
+    totalCount: 0,
+    thisMonthCount: 0,
+    thisWeekCount: 0,
   });
 
   useEffect(() => {
@@ -79,7 +89,82 @@ const Statistics = () => {
       }
     };
 
+    const fetchBlacklistData = async () => {
+      try {
+        const { data: blacklistRecords, error } = await supabase
+          .from('customer_blacklist')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        const records = blacklistRecords || [];
+        
+        // Calculate monthly data (last 12 months)
+        const monthlyData = [];
+        for (let i = 11; i >= 0; i--) {
+          const monthStart = new Date(new Date().getFullYear(), new Date().getMonth() - i, 1);
+          const monthEnd = new Date(new Date().getFullYear(), new Date().getMonth() - i + 1, 1);
+          
+          const monthCount = records.filter(record => {
+            const createdDate = new Date(record.created_at);
+            return createdDate >= monthStart && createdDate < monthEnd;
+          }).length;
+          
+          const monthName = monthStart.toLocaleDateString('lv-LV', { month: 'short' });
+          monthlyData.push({ period: monthName, count: monthCount });
+        }
+
+        // Calculate weekly data (last 12 weeks)
+        const weeklyData = [];
+        const now = new Date();
+        for (let i = 11; i >= 0; i--) {
+          const weekStart = new Date(now);
+          weekStart.setDate(now.getDate() - (i + 1) * 7);
+          weekStart.setHours(0, 0, 0, 0);
+          
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekStart.getDate() + 7);
+          
+          const weekCount = records.filter(record => {
+            const createdDate = new Date(record.created_at);
+            return createdDate >= weekStart && createdDate < weekEnd;
+          }).length;
+          
+          const weekLabel = `${weekStart.getDate()}.${weekStart.getMonth() + 1}`;
+          weeklyData.push({ period: weekLabel, count: weekCount });
+        }
+
+        // Calculate this month count
+        const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const thisMonthCount = records.filter(record => {
+          const createdDate = new Date(record.created_at);
+          return createdDate >= thisMonthStart;
+        }).length;
+
+        // Calculate this week count
+        const thisWeekStart = new Date(now);
+        thisWeekStart.setDate(now.getDate() - now.getDay());
+        thisWeekStart.setHours(0, 0, 0, 0);
+        const thisWeekCount = records.filter(record => {
+          const createdDate = new Date(record.created_at);
+          return createdDate >= thisWeekStart;
+        }).length;
+
+        setBlacklistData({
+          weekly: weeklyData,
+          monthly: monthlyData,
+          totalCount: records.length,
+          thisMonthCount,
+          thisWeekCount,
+        });
+      } catch (error) {
+        console.error('Error fetching blacklist data:', error);
+      }
+    };
+
     fetchStatisticsData();
+    fetchBlacklistData();
   }, [userProfile, isAdmin, isSuperAdmin, roleLoading]);
 
   const getStatisticsData = () => {
@@ -107,6 +192,16 @@ const Statistics = () => {
     sales: sale.value,
     revenue: dataToShow.revenue[idx]?.value || 0,
   }));
+
+  // Get blacklist data based on selected time period
+  const getBlacklistDataToShow = () => {
+    if (blacklistTimePeriod === 'weekly') {
+      return blacklistData.weekly;
+    }
+    return blacklistData.monthly;
+  };
+
+  const blacklistDataToShow = getBlacklistDataToShow();
 
   if (roleLoading || loading) {
     return (
@@ -303,6 +398,203 @@ const Statistics = () => {
                 fontWeight: 500,
               }}>
                 Pagaidām nav datu...
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {/* Blacklist Statistics Card */}
+        <Card
+          style={{
+            borderRadius: '16px',
+            border: '1px solid #e2e8f0',
+            background: '#ffffff',
+            padding: isMobile ? '16px' : isTablet ? '18px 20px' : '20px 24px',
+            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+            marginTop: '24px',
+          }}
+        >
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '20px',
+            marginBottom: '24px'
+          }}>
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column',
+              gap: '8px',
+              width: '100%'
+            }}
+            className="stats-header"
+            >
+              <div style={{ width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <StopOutlined style={{ fontSize: '18px', color: '#ef4444' }} />
+                  <h3 style={{ 
+                    fontSize: isMobile ? '16px' : isTablet ? '17px' : '18px', 
+                    fontWeight: 600, 
+                    color: '#212B36', 
+                    margin: 0
+                  }}>
+                    Melnā saraksta statistika
+                  </h3>
+                </div>
+                <p style={{ 
+                  fontSize: isMobile ? '13px' : '14px', 
+                  color: '#637381', 
+                  margin: 0 
+                }}>
+                  Klienti, kas pievienoti melnajam sarakstam
+                </p>
+              </div>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'start', 
+                gap: '12px',
+                width: '100%',
+                justifyContent: 'flex-end'
+              }}
+              className="time-period-buttons"
+              >
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '4px', 
+                  background: '#f1f5f9', 
+                  borderRadius: '8px', 
+                  padding: '4px' 
+                }}>
+                  <button
+                    onClick={() => setBlacklistTimePeriod('weekly')}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: blacklistTimePeriod === 'weekly' ? '#ffffff' : 'transparent',
+                      color: blacklistTimePeriod === 'weekly' ? '#212B36' : '#637381',
+                      boxShadow: blacklistTimePeriod === 'weekly' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Nedēļas
+                  </button>
+                  <button
+                    onClick={() => setBlacklistTimePeriod('monthly')}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: blacklistTimePeriod === 'monthly' ? '#ffffff' : 'transparent',
+                      color: blacklistTimePeriod === 'monthly' ? '#212B36' : '#637381',
+                      boxShadow: blacklistTimePeriod === 'monthly' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Mēneša
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Summary Stats */}
+          <div style={{ 
+            display: 'flex', 
+            gap: '16px', 
+            marginBottom: '24px',
+            flexWrap: 'wrap'
+          }}>
+            <div style={{ 
+              flex: '1 1 120px',
+              background: '#fef2f2', 
+              borderRadius: '12px', 
+              padding: '16px',
+              minWidth: '120px'
+            }}>
+              <div style={{ fontSize: '12px', color: '#991b1b', marginBottom: '4px', fontWeight: 500 }}>
+                Kopā melnajā sarakstā
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: '#ef4444' }}>
+                {blacklistData.totalCount}
+              </div>
+            </div>
+            <div style={{ 
+              flex: '1 1 120px',
+              background: '#fff7ed', 
+              borderRadius: '12px', 
+              padding: '16px',
+              minWidth: '120px'
+            }}>
+              <div style={{ fontSize: '12px', color: '#9a3412', marginBottom: '4px', fontWeight: 500 }}>
+                Šomēnes pievienoti
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: '#f97316' }}>
+                {blacklistData.thisMonthCount}
+              </div>
+            </div>
+            <div style={{ 
+              flex: '1 1 120px',
+              background: '#fefce8', 
+              borderRadius: '12px', 
+              padding: '16px',
+              minWidth: '120px'
+            }}>
+              <div style={{ fontSize: '12px', color: '#854d0e', marginBottom: '4px', fontWeight: 500 }}>
+                Šonedēļ pievienoti
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: '#eab308' }}>
+                {blacklistData.thisWeekCount}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ 
+            height: isMobile ? '250px' : isTablet ? '280px' : '300px', 
+            position: 'relative' 
+          }}>
+            {blacklistDataToShow.length > 0 ? (
+              <BarChart
+                width={undefined}
+                height={isMobile ? 250 : isTablet ? 280 : 300}
+                series={[
+                  {
+                    data: blacklistDataToShow.map(d => d.count),
+                    label: blacklistTimePeriod === 'weekly' ? 'Pievienoti nedēļā' : 'Pievienoti mēnesī',
+                  },
+                ]}
+                xAxis={[{
+                  scaleType: 'band',
+                  data: blacklistDataToShow.map(d => d.period),
+                }]}
+                yAxis={[{
+                  min: 0,
+                }]}
+                colors={['#ef4444']}
+                sx={{
+                  '& .MuiBarElement-root': {
+                    borderRadius: '4px 4px 0 0',
+                  },
+                  '& .MuiChartsAxis-root': {
+                    fontSize: isMobile ? '10px' : '12px',
+                  },
+                }}
+              />
+            ) : (
+              <div style={{
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#9ca3af',
+                fontSize: isMobile ? '14px' : '16px',
+                fontWeight: 500,
+              }}>
+                Nav datu par melnā saraksta izmaiņām
               </div>
             )}
           </div>

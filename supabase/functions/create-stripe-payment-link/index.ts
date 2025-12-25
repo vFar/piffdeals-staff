@@ -102,6 +102,10 @@ serve(async (req) => {
       .select('product_name, product_description, quantity, unit_price, total')
       .eq('invoice_id', invoice_id)
     
+    // Get VAT information from invoice
+    const vatRate = invoice.tax_rate || 0;
+    const vatAmount = invoice.tax_amount || 0;
+    
     if (itemsError) {
       throw itemsError;
     }
@@ -166,18 +170,33 @@ serve(async (req) => {
       // Customer information
       customer_email: invoice.customer_email,
       
-      // Line items
-      line_items: invoiceItems.map((item: any) => ({
-        price_data: {
-          currency: 'eur',
-          product_data: {
-            name: item.product_name,
-            description: item.product_description || undefined,
+      // Line items - include products and VAT as separate line item if applicable
+      line_items: [
+        // Product line items
+        ...invoiceItems.map((item: any) => ({
+          price_data: {
+            currency: 'eur',
+            product_data: {
+              name: item.product_name,
+              description: item.product_description || undefined,
+            },
+            unit_amount: Math.round(item.unit_price * 100), // Convert to cents
           },
-          unit_amount: Math.round(item.unit_price * 100), // Convert to cents
-        },
-        quantity: item.quantity,
-      })),
+          quantity: item.quantity,
+        })),
+        // VAT line item (if VAT is enabled and > 0)
+        ...(vatAmount > 0 ? [{
+          price_data: {
+            currency: 'eur',
+            product_data: {
+              name: `PVN (${(vatRate * 100).toFixed(0)}%)`,
+              description: 'Pievienotās vērtības nodoklis',
+            },
+            unit_amount: Math.round(vatAmount * 100), // Convert to cents
+          },
+          quantity: 1,
+        }] : []),
+      ],
       
       // Payment methods - Focus on Baltic countries (Latvia, Estonia, Lithuania)
       // IMPORTANT: Only include payment methods that are ENABLED in Stripe Dashboard

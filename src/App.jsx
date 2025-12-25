@@ -2,7 +2,6 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import RoleRoute from './components/RoleRoute';
 import SessionTimeoutNotifier from './components/SessionTimeoutNotifier';
-import SessionTerminatedNotifier from './components/SessionTerminatedNotifier';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
@@ -14,16 +13,17 @@ import ViewInvoice from './pages/ViewInvoice';
 import PublicInvoice from './pages/PublicInvoice';
 import InvoiceTemplates from './pages/InvoiceTemplates';
 import ActivityLogs from './pages/ActivityLogs';
+import CompanySettings from './pages/CompanySettings';
 import SalesCharts from './pages/SalesCharts';
 import Analytics from './pages/Analytics';
 import Statistics from './pages/Statistics';
 import SalesAnalytics from './pages/SalesAnalytics';
+import Blacklist from './pages/Blacklist';
 
 function App() {
   return (
     <>
       <SessionTimeoutNotifier />
-      <SessionTerminatedNotifier />
       <Routes>
       {/* Public Routes */}
       <Route path="/login" element={<Login />} />
@@ -121,6 +121,17 @@ function App() {
       />
 
       <Route 
+        path="/company-settings" 
+        element={
+          <ProtectedRoute>
+            <RoleRoute allowedRoles={['super_admin']}>
+              <CompanySettings />
+            </RoleRoute>
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
         path="/sales-charts" 
         element={
           <ProtectedRoute>
@@ -161,6 +172,15 @@ function App() {
         element={
           <ProtectedRoute>
             <Analytics />
+          </ProtectedRoute>
+        } 
+      />
+
+      <Route 
+        path="/blacklist" 
+        element={
+          <ProtectedRoute>
+            <Blacklist />
           </ProtectedRoute>
         } 
       />

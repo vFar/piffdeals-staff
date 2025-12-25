@@ -116,3 +116,6 @@ GRANT EXECUTE ON FUNCTION public.update_session_activity TO service_role, authen
 -- Comment on table
 COMMENT ON TABLE public.active_sessions IS 'Tracks active user sessions for single-session-only authentication';
 
+
+
+

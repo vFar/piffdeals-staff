@@ -168,52 +168,8 @@ serve(async (req) => {
       // Non-critical error, continue
     }
 
-    // SINGLE SESSION ENFORCEMENT: Terminate all other sessions for this user
-    try {
-      // Generate a unique session identifier
-      const sessionId = `${authData.user.id}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-      
-      // Calculate session expiration (same as JWT expiration, typically 1 hour)
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
-      
-      // Get user agent
-      const userAgent = req.headers.get('user-agent') || null;
-      
-      // Terminate all existing sessions for this user
-      await supabaseAdmin.rpc('terminate_other_sessions', {
-        p_user_id: authData.user.id,
-        p_current_session_id: sessionId,
-      });
-      
-      // Store the new active session
-      await supabaseAdmin
-        .from('active_sessions')
-        .insert({
-          user_id: authData.user.id,
-          session_id: sessionId,
-          access_token: authData.session.access_token,
-          refresh_token: authData.session.refresh_token,
-          expires_at: expiresAt.toISOString(),
-          ip_address: clientIP,
-          user_agent: userAgent,
-        });
-      
-      // Add session_id to the session response for client-side tracking
-      authData.session.session_id = sessionId;
-    } catch (sessionError) {
-      console.error('Error managing sessions:', sessionError);
-      // Continue even if session management fails (auth still succeeded)
-    }
-
     // Log successful login activity with IP address
     try {
-      // Get user profile for logging
-      const { data: userProfile } = await supabaseAdmin
-        .from('user_profiles')
-        .select('username, email, role')
-        .eq('id', authData.user.id)
-        .maybeSingle();
-
       // Get user agent
       const userAgent = req.headers.get('user-agent') || null;
 
@@ -259,11 +215,3 @@ serve(async (req) => {
     );
   }
 });
-
-
-
-
-
-
-
-

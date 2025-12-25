@@ -1,0 +1,20 @@
+[33ma246dc4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m single session implementation bug fixes
+[33mf34f652[m bug fixes, more tests
+[33m7dd1df8[m Add sales analytics and invoice access control features
+[33mdbb27ee[m email automatic sending, cron function setup, removed unsent invoice status
+[33m591dbe3[m - Add activity logging edge function with IP address capture - Implement ErrorBoundary component for graceful error handling - Add reusable Pagination component with responsive design - Add comprehensive frontend testing guides and documentation - Enhance notification system and activity logging service - Update multiple components and pages with improvements - Fix activity logging IP address capture issues
+[33m0d813dd[m[33m ([m[1;32merror-boundary-pwUwi[m[33m, [m[1;32m2025-12-01-q64j-AQME3[m[33m)[m testing activity logs for other users and email image build
+[33m579ab33[m fix: Invoice permissions and email sending + activity logging
+[33m4d3a105[m SKU scanner integration
+[33m78caec2[m this code is working on mac, while windows has broken db code
+[33m99739a4[m vercel json changes for safari
+[33m2365116[m pushing changes to production, fixing tests
+[33m1631831[m added rate limiting and added sales charts
+[33m27800fc[m Add login rate limiting - block after 5 attempts for 15 minutes
+[33mdb0b153[m file cleanup
+[33mbfd1240[m preparing for vercel deployment, added so many functionalities
+[33m4fd8b34[m mozello store api plugged in, invoice page created
+[33ma6f3195[m user accounts page crud, statuses and roles profile page created
+[33m3d9fa23[m supabase setup
+[33me1fd642[m revert commit, replaced firebase with supabase, user auth and user accounts pages, api fetches data from supabase, ran sql code for tables
+[33mf261a40[m Repo creation, dependency install

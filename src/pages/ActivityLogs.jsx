@@ -149,6 +149,7 @@ const ActivityLogs = () => {
       'login': 'Pieteikšanās sistēmā',
       'logout': 'Iziet no sistēmas',
       'system_config_changed': 'Mainīti sistēmas iestatījumi',
+      'vat_setting_changed': 'Mainīts PVN iestatījums',
       
       // Security
       'unauthorized_access_attempt': 'Mēģinājums piekļūt bez atļaujas',
@@ -268,6 +269,11 @@ const ActivityLogs = () => {
         'action_performed_by': 'Veica',
         'target_user_role': 'Mērķa lietotāja loma',
         'target_user_status': 'Mērķa lietotāja statuss',
+        
+        // System settings
+        'vat_enabled': 'PVN ieslēgts',
+        'vat_rate': 'PVN likme (%)',
+        'old_vat_enabled': 'Vecais PVN statuss',
       };
       
       // Filter out ALL technical/internal fields - ONLY show user-friendly information
@@ -296,7 +302,8 @@ const ActivityLogs = () => {
           'invoice_number', 'old_invoice_status', 'new_invoice_status',
           'customer_name', 'total_amount', 'is_own_invoice', 'is_other_user_invoice',
           'creator_username', 'modified_by', 'payment_method',
-          'action_performed_by', 'target_user_role', 'target_user_status'
+          'action_performed_by', 'target_user_role', 'target_user_status',
+          'vat_enabled', 'vat_rate', 'old_vat_enabled'
         ];
         return allowedKeys.includes(key);
       });

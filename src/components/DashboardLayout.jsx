@@ -15,6 +15,7 @@ import {
   HistoryOutlined,
   MenuOutlined,
   CloseOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -386,63 +387,89 @@ const DashboardLayout = ({ children }) => {
     const shouldShowAdmin = roleLoading ? cachedIsAdmin : isAdmin;
     const shouldShowSuperAdmin = roleLoading ? cachedIsSuperAdmin : isSuperAdmin;
     
-    return [
+    const items = [
+      // Main Section
       {
         key: '/dashboard',
-        icon: <DashboardOutlined style={{ fontSize: '20px' }} />,
-        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Informācijas panelis</span>,
+        icon: <DashboardOutlined style={{ fontSize: '18px' }} />,
+        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Panelis</span>,
       },
       {
         key: '/invoices',
-        icon: <FileTextOutlined style={{ fontSize: '20px' }} />,
+        icon: <FileTextOutlined style={{ fontSize: '18px' }} />,
         label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Rēķini</span>,
       },
       {
         key: '/invoice-templates',
-        icon: <FileProtectOutlined style={{ fontSize: '20px' }} />,
-        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Mani paraugi</span>,
+        icon: <FileProtectOutlined style={{ fontSize: '18px' }} />,
+        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Paraugi</span>,
       },
       {
+        type: 'divider',
+      },
+      // Analytics Section
+      {
         key: '/sales-charts',
-        icon: <BarChartOutlined style={{ fontSize: '20px' }} />,
-        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Pārdošanas grafiki</span>,
+        icon: <BarChartOutlined style={{ fontSize: '18px' }} />,
+        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Analītika</span>,
         children: [
           {
             key: '/sales-charts/overview',
-            label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Pārskats</span>,
+            label: <span style={{ fontSize: '13px', fontWeight: 500 }}>Pārskats</span>,
           },
           {
             key: '/sales-charts/statistics',
-            label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Statistika</span>,
+            label: <span style={{ fontSize: '13px', fontWeight: 500 }}>Statistika</span>,
           },
           {
             key: '/sales-charts/sales-analytics',
-            label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Pārdošanas analītika</span>,
+            label: <span style={{ fontSize: '13px', fontWeight: 500 }}>Pārdošana</span>,
           },
           {
             key: '/sales-charts/analytics',
-            label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Vispārējā analītika</span>,
+            label: <span style={{ fontSize: '13px', fontWeight: 500 }}>Vispārējā</span>,
           },
         ],
       },
-      // Only show User Accounts to admins (uses cached value during loading for smooth UX)
-      ...(shouldShowAdmin ? [{
-        key: '/user-accounts',
-        icon: <TeamOutlined style={{ fontSize: '20px' }} />,
-        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Lietotāju konti</span>,
-      }] : []),
-      // Only show Activity Logs to super_admins
-      ...(shouldShowSuperAdmin ? [{
-        key: '/activity-logs',
-        icon: <HistoryOutlined style={{ fontSize: '20px' }} />,
-        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Darbību žurnāls</span>,
-      }] : []),
       {
-        key: '/profile',
-        icon: <SettingOutlined style={{ fontSize: '20px' }} />,
-        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Iestatījumi</span>,
+        key: '/blacklist',
+        icon: <StopOutlined style={{ fontSize: '18px' }} />,
+        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Melnais saraksts</span>,
       },
     ];
+
+    // Admin Section
+    if (shouldShowAdmin || shouldShowSuperAdmin) {
+      items.push({
+        type: 'divider',
+      });
+    }
+
+    if (shouldShowAdmin) {
+      items.push({
+        key: '/user-accounts',
+        icon: <TeamOutlined style={{ fontSize: '18px' }} />,
+        label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Lietotāji</span>,
+      });
+    }
+
+    // Super Admin Section
+    if (shouldShowSuperAdmin) {
+      items.push(
+        {
+          key: '/activity-logs',
+          icon: <HistoryOutlined style={{ fontSize: '18px' }} />,
+          label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Žurnāls</span>,
+        },
+        {
+          key: '/company-settings',
+          icon: <SettingOutlined style={{ fontSize: '18px' }} />,
+          label: <span style={{ fontSize: '14px', fontWeight: 500 }}>Iestatījumi</span>,
+        }
+      );
+    }
+
+    return items;
   }, [isAdmin, isSuperAdmin, roleLoading, cachedIsAdmin, cachedIsSuperAdmin]);
 
   // Get the selected menu key based on current pathname
@@ -459,6 +486,11 @@ const DashboardLayout = ({ children }) => {
       return '/invoice-templates';
     }
     
+    // For blacklist
+    if (path.startsWith('/blacklist')) {
+      return '/blacklist';
+    }
+    
     // For user accounts related paths
     if (path.startsWith('/user-accounts')) {
       return '/user-accounts';
@@ -469,9 +501,9 @@ const DashboardLayout = ({ children }) => {
       return '/activity-logs';
     }
     
-    // For profile
-    if (path.startsWith('/profile')) {
-      return '/profile';
+    // For company settings
+    if (path.startsWith('/company-settings')) {
+      return '/company-settings';
     }
     
     // For sales charts and nested analytics
@@ -482,6 +514,11 @@ const DashboardLayout = ({ children }) => {
     // Default to dashboard
     if (path === '/' || path.startsWith('/dashboard')) {
       return '/dashboard';
+    }
+    
+    // For profile page, don't highlight any menu item (it's in user dropdown)
+    if (path.startsWith('/profile')) {
+      return '';
     }
     
     // Return the path as-is if it matches exactly
@@ -1556,7 +1593,7 @@ const DashboardLayout = ({ children }) => {
           height: 40px;
           line-height: 40px;
           border-radius: 8px;
-          margin-bottom: 8px;
+          margin-bottom: 4px;
           color: #4b5563;
           transition: all 0.2s;
         }
@@ -1583,7 +1620,7 @@ const DashboardLayout = ({ children }) => {
           height: 40px;
           line-height: 40px;
           border-radius: 8px;
-          margin-bottom: 8px;
+          margin-bottom: 4px;
           color: #4b5563;
           transition: all 0.2s;
         }
@@ -1608,6 +1645,12 @@ const DashboardLayout = ({ children }) => {
           height: 36px;
           line-height: 36px;
           padding-left: 48px !important;
+          margin-bottom: 2px;
+        }
+
+        .custom-menu .ant-menu-item-divider {
+          margin: 12px 0;
+          background: #e5e7eb;
         }
 
         .user-dropdown-trigger:hover {

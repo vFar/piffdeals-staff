@@ -724,83 +724,6 @@ const CreateInvoice = ({ mode = 'create' }) => {
   return (
     <DashboardLayout>
       <style>{`
-        /* Responsive Action Buttons */
-        .action-buttons {
-          display: flex;
-          justify-content: space-between;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .primary-button-wrapper {
-          display: flex;
-          gap: 12px;
-          margin-left: auto;
-        }
-
-        .button-text-short {
-          display: none;
-        }
-
-        .button-text-full {
-          display: inline;
-        }
-
-        @media (max-width: 640px) {
-          .action-buttons {
-            flex-direction: column;
-            width: 100%;
-          }
-
-          .template-button,
-          .save-button {
-            width: 100%;
-            justify-content: center;
-          }
-
-          .primary-button-wrapper {
-            width: 100%;
-            margin-left: 0;
-          }
-
-          .save-button {
-            width: 100%;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .button-text-full {
-            display: none;
-          }
-
-          .button-text-short {
-            display: inline;
-          }
-
-          .page-title {
-            font-size: 24px !important;
-          }
-        }
-
-        /* Responsive Grid Sections */
-        @media (max-width: 768px) {
-          .invoice-sections {
-            grid-template-columns: 1fr !important;
-            gap: 24px !important;
-          }
-
-          .totals-section {
-            width: 100% !important;
-          }
-        }
-
-        /* Table Responsive */
-        @media (max-width: 640px) {
-          .ant-table-wrapper {
-            overflow-x: auto;
-          }
-        }
-
         /* Match original HTML design exactly */
         .ant-input,
         .ant-input-number,
@@ -920,10 +843,10 @@ const CreateInvoice = ({ mode = 'create' }) => {
         }
       `}</style>
       <Spin spinning={loading || loadingInvoice}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 16px' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
           <div style={{ marginBottom: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }} className="page-title">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h1 style={{ fontSize: 30, fontWeight: 700, margin: 0, color: '#111827' }}>
                 {mode === 'edit' ? 'Rediģēt rēķinu' : 'Izveidot rēķinu'}
               </h1>
               <Tooltip 
@@ -976,7 +899,7 @@ const CreateInvoice = ({ mode = 'create' }) => {
               <Divider />
 
               {/* Bill To & Details Section */}
-              <div className="invoice-sections" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 32, marginBottom: 32 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 32, marginBottom: 32 }}>
                 <div>
                   <h3 style={{ fontSize: 18, fontWeight: 600, color: '#111827', marginBottom: 16 }}>
                     Rēķina saņēmējs:
@@ -1222,7 +1145,7 @@ const CreateInvoice = ({ mode = 'create' }) => {
 
             {/* Totals */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 32 }}>
-              <div className="totals-section" style={{ width: 400, maxWidth: '100%' }}>
+              <div style={{ width: 400 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', fontSize: 16 }}>
                   <span style={{ color: '#6b7280' }}>Starpsumma</span>
                   <span style={{ fontWeight: 500, color: '#111827' }}>€{calculateSubtotal().toFixed(2)}</span>
@@ -1257,9 +1180,18 @@ const CreateInvoice = ({ mode = 'create' }) => {
                 </Form.Item>
               </div>
 
+              {/* Important Notice */}
+              <Alert
+                message="Svarīgi: Automātiskie atgādinājuma e-pasti"
+                description="Automātiskie atgādinājuma e-pasti tiks nosūtīti klientiem tikai tad, ja rēķins ir nosūtīts klientam caur e-pastu vai atzīmēts kā 'nosūtīts klientam'. Ja rēķins nav nosūtīts, automātiskie atgādinājumi nedarbosies."
+                type="info"
+                showIcon
+                style={{ marginBottom: 24, fontSize: '13px' }}
+                icon={<InfoCircleOutlined />}
+              />
 
               {/* Action Buttons */}
-              <div className="action-buttons">
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                 {mode === 'create' && (
                   <Button
                     icon={<FileTextOutlined />}
@@ -1268,26 +1200,18 @@ const CreateInvoice = ({ mode = 'create' }) => {
                       borderColor: '#d9d9d9',
                       color: '#0068FF',
                     }}
-                    className="template-button"
                   >
-                    <span className="button-text-full">Saglabāt kā šablonu</span>
-                    <span className="button-text-short">Šablons</span>
+                    Saglabāt kā šablonu
                   </Button>
                 )}
-                <div className="primary-button-wrapper">
+                <div style={{ display: 'flex', gap: 12, marginLeft: 'auto' }}>
                   <Button
                     type="primary"
                     icon={<SaveOutlined />}
                     onClick={() => handleSave()}
                     loading={loading}
-                    className="save-button"
                   >
-                    <span className="button-text-full">
-                      {mode === 'edit' ? 'Saglabāt izmaiņas' : 'Izveidot rēķinu'}
-                    </span>
-                    <span className="button-text-short">
-                      {mode === 'edit' ? 'Saglabāt' : 'Izveidot'}
-                    </span>
+                    {mode === 'edit' ? 'Saglabāt izmaiņas' : 'Izveidot rēķinu'}
                   </Button>
                 </div>
               </div>

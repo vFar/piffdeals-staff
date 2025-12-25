@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { supabase, db } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext(undefined);
 
@@ -15,32 +15,6 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [sessionId, setSessionId] = useState(null);
-
-  // Validate if session is still active in database
-  const validateSession = useCallback(async (userId) => {
-    if (!userId) return false;
-    
-    const storedSessionId = localStorage.getItem('session_id');
-    if (!storedSessionId) return false;
-    
-    try {
-      const { data, error } = await supabase.rpc('is_session_valid', {
-        p_user_id: userId,
-        p_session_id: storedSessionId,
-      });
-      
-      if (error) {
-        console.error('Error validating session:', error);
-        return false;
-      }
-      
-      return data === true;
-    } catch (error) {
-      console.error('Session validation error:', error);
-      return false;
-    }
-  }, []);
 
   // Fetch user profile from user_profiles table
   const fetchUserProfile = useCallback(async (userId) => {
@@ -86,18 +60,8 @@ export const AuthProvider = ({ children }) => {
     // Check active sessions and sets the user
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        // Validate session is still active in database
-        const isValid = await validateSession(session.user.id);
-        if (isValid) {
-          setCurrentUser(session.user);
-          await fetchUserProfile(session.user.id);
-        } else {
-          // Session was terminated (logged in elsewhere), sign out locally
-          await supabase.auth.signOut({ scope: 'local' });
-          setCurrentUser(null);
-          setUserProfile(null);
-          setSessionId(null);
-        }
+        setCurrentUser(session.user);
+        await fetchUserProfile(session.user.id);
       } else {
         setCurrentUser(null);
       }
@@ -106,20 +70,6 @@ export const AuthProvider = ({ children }) => {
 
     // Listen for changes on auth state (sign in, sign out, etc.)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Handle TOKEN_REFRESHED event - validate session is still active
-      if (event === 'TOKEN_REFRESHED' && session?.user) {
-        const isValid = await validateSession(session.user.id);
-        if (!isValid) {
-          // Session was terminated elsewhere, sign out locally
-          await supabase.auth.signOut({ scope: 'local' });
-          setCurrentUser(null);
-          setUserProfile(null);
-          setSessionId(null);
-          setLoading(false);
-          return;
-        }
-      }
-      
       setCurrentUser(session?.user ?? null);
       
       // Set loading to false immediately - don't wait for profile
@@ -135,33 +85,11 @@ export const AuthProvider = ({ children }) => {
         }, 0);
       } else {
         setUserProfile(null);
-        setSessionId(null);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchUserProfile, validateSession]);
-
-  // Periodic session validation check (every 30 seconds)
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const intervalId = setInterval(async () => {
-      const isValid = await validateSession(currentUser.id);
-      if (!isValid) {
-        // Session was terminated elsewhere, sign out locally
-        await supabase.auth.signOut({ scope: 'local' });
-        setCurrentUser(null);
-        setUserProfile(null);
-        setSessionId(null);
-        
-        // Show notification that user was logged out
-        console.warn('Session terminated: User logged in from another device');
-      }
-    }, 30000); // Check every 30 seconds
-
-    return () => clearInterval(intervalId);
-  }, [currentUser, validateSession]);
+  }, [fetchUserProfile]);
 
   /**
    * Sign out
@@ -181,7 +109,6 @@ export const AuthProvider = ({ children }) => {
       // Always clear local state
       setUserProfile(null);
       setCurrentUser(null);
-      setSessionId(null);
       // Clear local storage
       localStorage.clear();
       sessionStorage.clear();
@@ -239,12 +166,6 @@ export const AuthProvider = ({ children }) => {
         access_token: result.session.access_token,
         refresh_token: result.session.refresh_token,
       });
-      
-      // Store session ID for validation
-      if (result.session.session_id) {
-        localStorage.setItem('session_id', result.session.session_id);
-        setSessionId(result.session.session_id);
-      }
     }
 
     // Profile will be fetched by auth state change listener
