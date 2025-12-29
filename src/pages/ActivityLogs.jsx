@@ -6,6 +6,12 @@ import Pagination from '../components/Pagination';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
+
+// Enable UTC and timezone plugins for proper timestamp handling
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -108,10 +114,12 @@ const ActivityLogs = () => {
 
     // Date range filter
     if (dateRange && dateRange.length === 2) {
+      // Use local timezone for date range comparison (user selects dates in their timezone)
       const startDate = dateRange[0].startOf('day');
       const endDate = dateRange[1].endOf('day');
       filtered = filtered.filter(log => {
-        const logDate = dayjs(log.created_at);
+        // Parse the UTC timestamp from database and convert to local time for comparison
+        const logDate = dayjs.utc(log.created_at).local();
         return logDate.isAfter(startDate.subtract(1, 'second')) && 
                logDate.isBefore(endDate.add(1, 'second'));
       });
@@ -148,8 +156,12 @@ const ActivityLogs = () => {
       // System
       'login': 'Pieteikšanās sistēmā',
       'logout': 'Iziet no sistēmas',
-      'system_config_changed': 'Mainīti sistēmas iestatījumi',
-      'vat_setting_changed': 'Mainīts PVN iestatījums',
+      'system_config_changed': 'Mainīts PVN iestatījums',
+      
+      // Blacklist management
+      'blacklist_added': 'Pievienots melnajam sarakstam',
+      'blacklist_updated': 'Rediģēts melnā saraksta ieraksts',
+      'blacklist_deleted': 'Dzēsts no melnā saraksta',
       
       // Security
       'unauthorized_access_attempt': 'Mēģinājums piekļūt bez atļaujas',
@@ -159,12 +171,13 @@ const ActivityLogs = () => {
   };
 
   const getActionTypeColor = (actionType) => {
-    if (actionType?.includes('created')) return 'green';
+    if (actionType?.includes('created') || actionType?.includes('added')) return 'green';
     if (actionType?.includes('updated')) return 'blue';
     if (actionType?.includes('deleted')) return 'red';
     if (actionType?.includes('sent')) return 'cyan';
     if (actionType?.includes('changed')) return 'orange';
     if (actionType?.includes('reset') || actionType?.includes('password')) return 'purple';
+    if (actionType?.includes('blacklist')) return 'volcano';
     return 'default';
   };
 
@@ -172,6 +185,7 @@ const ActivityLogs = () => {
     const labels = {
       'user_management': 'Lietotāju pārvalde',
       'invoice_management': 'Rēķinu pārvalde',
+      'blacklist_management': 'Melnais saraksts',
       'system': 'Sistēma',
       'security': 'Drošība',
     };
@@ -182,6 +196,7 @@ const ActivityLogs = () => {
     const colors = {
       'user_management': 'purple',
       'invoice_management': 'blue',
+      'blacklist_management': 'volcano',
       'system': 'default',
       'security': 'red',
     };
@@ -273,7 +288,16 @@ const ActivityLogs = () => {
         // System settings
         'vat_enabled': 'PVN ieslēgts',
         'vat_rate': 'PVN likme (%)',
-        'old_vat_enabled': 'Vecais PVN statuss',
+        'old_vat_enabled': 'Iepriekšējais PVN statuss',
+        'old_vat_rate': 'Iepriekšējā PVN likme (%)',
+        'enabled_changed': 'PVN statuss mainīts',
+        'rate_changed': 'PVN likme mainīta',
+        
+        // Blacklist management
+        'reason': 'Iemesls',
+        'overdue_count': 'Nokavēti rēķini',
+        'old_customer_name': 'Iepriekšējais vārds',
+        'added_by': 'Pievienoja',
       };
       
       // Filter out ALL technical/internal fields - ONLY show user-friendly information
@@ -303,7 +327,8 @@ const ActivityLogs = () => {
           'customer_name', 'total_amount', 'is_own_invoice', 'is_other_user_invoice',
           'creator_username', 'modified_by', 'payment_method',
           'action_performed_by', 'target_user_role', 'target_user_status',
-          'vat_enabled', 'vat_rate', 'old_vat_enabled'
+          'vat_enabled', 'vat_rate', 'old_vat_enabled', 'old_vat_rate', 'enabled_changed', 'rate_changed',
+          'reason', 'overdue_count', 'old_customer_name', 'added_by'
         ];
         return allowedKeys.includes(key);
       });
@@ -342,10 +367,13 @@ const ActivityLogs = () => {
             else if (typeof value === 'boolean') {
               displayValue = value ? 'Jā' : 'Nē';
             }
-            // Format numbers (amounts)
+            // Format numbers (amounts and rates)
             else if (typeof value === 'number') {
               if (key.includes('amount') || key.includes('total')) {
                 displayValue = `€${parseFloat(value).toFixed(2)}`;
+              } else if (key.includes('vat_rate') || key.includes('_rate')) {
+                // Format VAT rates with % suffix
+                displayValue = `${parseFloat(value).toFixed(2)}%`;
               } else {
                 displayValue = String(value);
               }
@@ -375,9 +403,14 @@ const ActivityLogs = () => {
       key: 'created_at',
       width: 200,
       render: (date) => {
-        const dateObj = dayjs(date);
+        // Parse UTC timestamp from database and convert to local timezone for display
+        const dateObj = dayjs.utc(date).local();
         const now = dayjs();
-        const diffDays = now.diff(dateObj, 'day');
+        
+        // Compare dates in local timezone (using start of day for proper comparison)
+        const today = now.startOf('day');
+        const logDay = dateObj.startOf('day');
+        const diffDays = today.diff(logDay, 'day');
         
         if (diffDays === 0) {
           // Today - show time with seconds
@@ -395,7 +428,7 @@ const ActivityLogs = () => {
               <div style={{ fontSize: '12px', color: '#6b7280' }}>{dateObj.format('HH:mm:ss')}</div>
             </div>
           );
-        } else if (diffDays < 7) {
+        } else if (diffDays < 7 && diffDays > 0) {
           // This week - show day name
           const dayNames = ['Svētdiena', 'Pirmdiena', 'Otrdiena', 'Trešdiena', 'Ceturtdiena', 'Piektdiena', 'Sestdiena'];
           return (
@@ -406,7 +439,7 @@ const ActivityLogs = () => {
             </div>
           );
         } else {
-          // Older - show full date and time
+          // Older or future (shouldn't happen but handle gracefully) - show full date and time
           return (
             <div>
               <div style={{ fontWeight: 500, color: '#111827' }}>{dateObj.format('DD.MM.YYYY')}</div>
@@ -415,7 +448,7 @@ const ActivityLogs = () => {
           );
         }
       },
-      sorter: (a, b) => dayjs(a.created_at).unix() - dayjs(b.created_at).unix(),
+      sorter: (a, b) => dayjs.utc(a.created_at).unix() - dayjs.utc(b.created_at).unix(),
     },
     {
       title: 'Lietotājs',
@@ -658,6 +691,14 @@ const ActivityLogs = () => {
             </div>
             <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
               Rēķinu darbības
+            </div>
+          </Card>
+          <Card size="small" style={{ flex: 1, minWidth: '150px' }}>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: '#fa541c' }}>
+              {filteredLogs.filter(log => log.action_category === 'blacklist_management').length}
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+              Melnā saraksta darbības
             </div>
           </Card>
           <Card size="small" style={{ flex: 1, minWidth: '150px' }}>

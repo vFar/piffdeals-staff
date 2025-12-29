@@ -270,8 +270,8 @@ serve(async (req) => {
     
     // Warn if using localhost (Edge Functions can't access localhost)
     if (finalSiteUrl.includes('localhost') || finalSiteUrl.includes('127.0.0.1')) {
-      console.warn('WARNING: PUBLIC_SITE_URL appears to be localhost. Edge Functions cannot access localhost URLs. Images may not load.');
-      console.warn('Consider setting PUBLIC_SITE_URL to https://staff.piffdeals.lv in Edge Function secrets');
+      // WARNING: PUBLIC_SITE_URL appears to be localhost. Edge Functions cannot access localhost URLs. Images may not load.
+      // Consider setting PUBLIC_SITE_URL to https://staff.piffdeals.lv in Edge Function secrets
     }
     
     // Ensure HTTPS is used for production (unless explicitly localhost)
@@ -282,9 +282,6 @@ serve(async (req) => {
     const logoImageUrl = `${secureSiteUrl}/images/S-3.png`;
     const textLogoAccentUrl = `${secureSiteUrl}/images/piffdeals_text_accent.png`;
     const textLogoPrimaryUrl = `${secureSiteUrl}/images/piffdeals_text_primary.png`;
-    
-    console.log('Using site URL:', secureSiteUrl);
-    console.log('Image URLs to fetch:', { logoImageUrl, textLogoAccentUrl, textLogoPrimaryUrl });
     
     // Fetch images and convert to base64 for embedding in email
     // This ensures images display in all email clients without requiring external access
@@ -305,7 +302,6 @@ serve(async (req) => {
     // Helper function to fetch and convert PNG to base64
     const fetchPngAsBase64 = async (url: string, imageName: string): Promise<string> => {
       try {
-        console.log(`Fetching ${imageName} from: ${url}`);
         const response = await fetch(url, {
           method: 'GET',
           headers: {
@@ -313,26 +309,21 @@ serve(async (req) => {
           },
         });
         
-        console.log(`${imageName} response status: ${response.status} ${response.statusText}`);
-        
         if (response.ok) {
           const buffer = await response.arrayBuffer();
           const base64String = arrayBufferToBase64(buffer);
           const dataUri = `data:image/png;base64,${base64String}`;
-          console.log(`${imageName} successfully converted to base64 (${dataUri.length} chars)`);
           return dataUri;
         } else {
-          const errorText = await response.text().catch(() => 'Unable to read error response');
-          console.error(`Failed to fetch ${imageName}: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`);
+          // Failed to fetch image
         }
       } catch (error) {
-        console.error(`Error fetching ${imageName} from ${url}:`, error);
+        // Error fetching image
       }
       return '';
     };
     
     // Fetch all images in parallel
-    console.log('Starting image fetch for:', { logoImageUrl, textLogoAccentUrl, textLogoPrimaryUrl });
     const [logoBase64Result, textLogoAccentBase64Result, textLogoPrimaryBase64Result] = await Promise.all([
       fetchPngAsBase64(logoImageUrl, 'S-3.png'),
       fetchPngAsBase64(textLogoAccentUrl, 'piffdeals_text_accent.png'),
@@ -343,12 +334,6 @@ serve(async (req) => {
     textLogoAccentBase64 = textLogoAccentBase64Result;
     textLogoPrimaryBase64 = textLogoPrimaryBase64Result;
     
-    console.log('Image fetch results:', {
-      logoLoaded: !!logoBase64,
-      accentLoaded: !!textLogoAccentBase64,
-      primaryLoaded: !!textLogoPrimaryBase64,
-    });
-    
     // Use the HTTP URLs directly - these should work in emails
     const finalLogoUrl = logoImageUrl;
     const finalTextLogoAccentUrl = textLogoAccentUrl;
@@ -358,12 +343,6 @@ serve(async (req) => {
     if (!finalLogoUrl || finalLogoUrl.trim() === '' ||
         !finalTextLogoAccentUrl || finalTextLogoAccentUrl.trim() === '' ||
         !finalTextLogoPrimaryUrl || finalTextLogoPrimaryUrl.trim() === '') {
-      console.error('CRITICAL ERROR: Image URLs are empty!', {
-        logoImageUrl,
-        textLogoAccentUrl,
-        textLogoPrimaryUrl,
-        secureSiteUrl,
-      });
       throw new Error(`Image URLs are invalid: logo=${!!finalLogoUrl}, accent=${!!finalTextLogoAccentUrl}, primary=${!!finalTextLogoPrimaryUrl}`);
     }
     
@@ -378,21 +357,14 @@ serve(async (req) => {
       throw new Error(`Invalid primary URL format: ${finalTextLogoPrimaryUrl}`);
     }
     
-    console.log('Using image URLs for email:', {
-      logo: finalLogoUrl,
-      accent: finalTextLogoAccentUrl,
-      primary: finalTextLogoPrimaryUrl,
-    });
-    
     // Quick test: Try to fetch the accent image to verify it's accessible
     try {
       const accentTestResponse = await fetch(finalTextLogoAccentUrl, { method: 'HEAD' });
-      console.log(`Accent image accessibility test: ${accentTestResponse.status} ${accentTestResponse.statusText}`);
       if (!accentTestResponse.ok) {
-        console.warn(`WARNING: Accent image may not be accessible at ${finalTextLogoAccentUrl}`);
+        // WARNING: Accent image may not be accessible
       }
     } catch (error) {
-      console.warn(`WARNING: Could not verify accent image accessibility:`, error);
+      // WARNING: Could not verify accent image accessibility
     }
 
     // Get email configuration
@@ -589,12 +561,6 @@ www.piffdeals.lv
         errorData = { error: errorText };
       }
       
-      console.error('Resend API error:', {
-        status: emailResponse.status,
-        statusText: emailResponse.statusText,
-        error: errorData,
-      });
-      
       return new Response(
         JSON.stringify({
           error: 'Failed to send email',
@@ -609,13 +575,6 @@ www.piffdeals.lv
     }
 
     const emailData = await emailResponse.json();
-    
-    // Log successful email send
-    console.log('Email sent successfully:', {
-      emailId: emailData.id,
-      to: userEmail,
-      from: FROM_EMAIL,
-    });
 
     // Update last_password_reset_sent timestamp
     await supabaseAdmin

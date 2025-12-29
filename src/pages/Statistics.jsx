@@ -83,7 +83,7 @@ const Statistics = () => {
 
         setStatisticsData(statsData);
       } catch (error) {
-        console.error('Error fetching statistics data:', error);
+        // Error fetching statistics data
       } finally {
         setLoading(false);
       }
@@ -159,7 +159,7 @@ const Statistics = () => {
           thisWeekCount,
         });
       } catch (error) {
-        console.error('Error fetching blacklist data:', error);
+        // Error fetching blacklist data
       }
     };
 

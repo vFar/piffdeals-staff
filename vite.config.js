@@ -39,14 +39,39 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       sourcemap: false, // Disable sourcemaps for production (smaller build)
       minify: 'esbuild', // Fast minification
+      cssCodeSplit: true, // Enable CSS code splitting
       rollupOptions: {
         output: {
-          manualChunks: {
-            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-            'supabase-vendor': ['@supabase/supabase-js'],
+          manualChunks: (id) => {
+            // React vendor chunk
+            if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router')) {
+              return 'react-vendor';
+            }
+            // Supabase vendor chunk
+            if (id.includes('node_modules/@supabase')) {
+              return 'supabase-vendor';
+            }
+            // Ant Design chunk (large library)
+            if (id.includes('node_modules/antd') || id.includes('node_modules/@ant-design')) {
+              return 'antd-vendor';
+            }
+            // MUI Charts chunk
+            if (id.includes('node_modules/@mui')) {
+              return 'mui-vendor';
+            }
+            // Chart libraries
+            if (id.includes('node_modules/chart.js') || id.includes('node_modules/recharts')) {
+              return 'charts-vendor';
+            }
           },
+          // Optimize chunk size
+          chunkFileNames: 'assets/[name]-[hash].js',
+          entryFileNames: 'assets/[name]-[hash].js',
+          assetFileNames: 'assets/[name]-[hash].[ext]',
         },
       },
+      // Optimize chunk size warnings
+      chunkSizeWarningLimit: 1000,
     },
   }
 })

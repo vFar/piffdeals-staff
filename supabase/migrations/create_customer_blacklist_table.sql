@@ -57,3 +57,6 @@ COMMENT ON COLUMN customer_blacklist.overdue_count IS 'Number of overdue invoice
 COMMENT ON COLUMN customer_blacklist.added_by IS 'User who added this customer to blacklist';
 
 
+
+
+

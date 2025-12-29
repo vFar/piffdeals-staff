@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Button, Table, message, Modal, Input, Dropdown, Card, Typography, Spin, Tag, App, Popconfirm, Tooltip } from 'antd';
 import { PlusOutlined, MoreOutlined, EyeOutlined, LinkOutlined, DeleteOutlined, SearchOutlined, EditOutlined, MailOutlined, CheckOutlined, CopyOutlined, InfoCircleOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -96,7 +96,7 @@ const Invoices = () => {
              statusLabel.includes(lowerSearch);
     });
 
-    setFilteredInvoices(filtered);
+      setFilteredInvoices(filtered);
     setCurrentPage(1);
   }, [searchText, invoices]);
 
@@ -320,7 +320,6 @@ const Invoices = () => {
         setSelectedInvoice(freshInvoice);
       }
     } catch (error) {
-      console.error('Failed to fetch fresh invoice data:', error);
       // Modal is already open with cached data, so this is non-critical
     }
   };
@@ -376,8 +375,6 @@ const Invoices = () => {
           session = refreshedSession;
           sessionError = null;
         } else if (refreshError) {
-          console.error('Failed to refresh session:', refreshError);
-          
           // If refresh fails, user needs to log in again
           // Clear any stale session data
           await supabase.auth.signOut();
@@ -388,7 +385,6 @@ const Invoices = () => {
       
       // Final check - if still no session or no access token, throw error
       if (!session || !session.access_token) {
-        console.error('No valid session after refresh attempt');
         throw new Error('Nav autentificēts. Lūdzu, pieslēdzieties atkārtoti.');
       }
       
@@ -512,7 +508,6 @@ const Invoices = () => {
           invoiceId
         );
       } catch (logError) {
-        console.error('Failed to log invoice resend:', logError);
         // Don't fail the entire operation if logging fails
       }
 
@@ -529,7 +524,6 @@ const Invoices = () => {
             .eq('id', invoiceId);
           
           if (updateError) {
-            console.error('Failed to update invoice status:', updateError);
             // Don't fail the entire operation if status update fails
           } else {
             // Update selectedInvoice to reflect new status without closing modal
@@ -543,7 +537,6 @@ const Invoices = () => {
             ));
           }
         } catch (statusError) {
-          console.error('Error updating invoice status:', statusError);
           // Don't fail the entire operation if status update fails
         }
       }
@@ -568,7 +561,7 @@ const Invoices = () => {
           ));
         }
       } catch (fetchError) {
-        console.error('Failed to fetch updated invoice:', fetchError);
+        // Failed to fetch updated invoice
       }
       
       // Close loading message and show success
@@ -610,7 +603,7 @@ const Invoices = () => {
             ));
           }
         } catch (fetchError) {
-          console.error('Failed to fetch updated invoice after cooldown:', fetchError);
+          // Failed to fetch updated invoice after cooldown
         }
         
         // Try to extract cooldown from error response
@@ -664,15 +657,6 @@ const Invoices = () => {
       // Users can still manually share the link, but sent_at should remain NULL until email is sent
       
       // Log error for debugging (skip for cooldown errors as they're user-facing)
-      if (errorType !== 'cooldown') {
-        console.error('Send email error:', {
-          errorType,
-          message: error?.message,
-          status: error?.status,
-          invoiceId: currentInvoice.id,
-          customerEmail: currentInvoice.customer_email,
-        });
-      }
     } finally {
       setSendingEmail(false);
     }
@@ -889,7 +873,8 @@ const Invoices = () => {
     return statusStyles[status] || statusStyles.draft;
   };
 
-  const columns = [
+  // Memoize columns to prevent recreation on every render
+  const columns = useMemo(() => [
     {
       title: <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151', textTransform: 'uppercase' }}>Rēķina Nr.</span>,
       dataIndex: 'invoice_number',
@@ -1272,7 +1257,7 @@ const Invoices = () => {
         );
       },
     },
-  ];
+  ], [userProfile, isAdmin, isSuperAdmin, navigate, handleViewPaymentLink, handleResendInvoice, handleMarkAsNotified, handleMarkAsPaid, handleDeleteInvoice, modal]);
 
   return (
     <DashboardLayout>

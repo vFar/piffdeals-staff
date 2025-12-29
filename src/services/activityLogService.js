@@ -47,7 +47,6 @@ export const logActivity = async ({
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     
     if (userError || !user) {
-      console.error('[ActivityLog] User not authenticated:', userError);
       return { success: false, error: new Error('User not authenticated') };
     }
 
@@ -65,7 +64,7 @@ export const logActivity = async ({
       .maybeSingle();
 
     if (profileError) {
-      console.warn('[ActivityLog] Could not fetch user profile:', profileError);
+      // Could not fetch user profile
     }
 
     // Prepare user data for logging
@@ -106,16 +105,12 @@ export const logActivity = async ({
           if (result.success) {
             return { success: true, logId: result.logId };
           } else {
-            console.warn('[ActivityLog] Edge Function returned error:', result.error);
             // Fall through to RPC fallback
           }
         } else {
-          const errorText = await response.text();
-          console.warn('[ActivityLog] Edge Function request failed:', response.status, errorText);
           // Fall through to RPC fallback
         }
       } catch (edgeFunctionError) {
-        console.warn('[ActivityLog] Edge Function call failed, falling back to RPC:', edgeFunctionError);
         // Fall through to RPC fallback
       }
     }
@@ -135,16 +130,11 @@ export const logActivity = async ({
     });
 
     if (error) {
-      console.error('[ActivityLog] RPC call failed:', {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint
-      });
-      
       // Always try direct insert as fallback if RPC fails
-      console.warn('[ActivityLog] Attempting direct insert as fallback...');
       try {
+        // Explicitly set created_at to current UTC timestamp for consistency
+        const now = new Date().toISOString();
+        
         const { data: insertData, error: insertError } = await supabase
           .from('activity_logs')
           .insert({
@@ -160,18 +150,12 @@ export const logActivity = async ({
             target_id: targetId,
             ip_address: ipAddress,
             user_agent: finalUserAgent,
+            created_at: now, // Explicitly set timestamp
           })
           .select('id')
           .single();
         
         if (insertError) {
-          console.error('[ActivityLog] Direct insert also failed:', {
-            code: insertError.code,
-            message: insertError.message,
-            details: insertError.details,
-            hint: insertError.hint
-          });
-          
           // Return the original RPC error, not the insert error
           return { 
             success: false, 
@@ -181,7 +165,6 @@ export const logActivity = async ({
         
         return { success: true, logId: insertData.id };
       } catch (fallbackError) {
-        console.error('[ActivityLog] Fallback insert exception:', fallbackError);
         return { 
           success: false, 
           error: new Error(`Failed to log activity: ${error.message || 'Unknown error'}. Please ensure the log_activity function exists in the database.`) 
@@ -190,9 +173,11 @@ export const logActivity = async ({
     }
 
     if (!data) {
-      console.warn('[ActivityLog] RPC returned no data, trying direct insert...');
       // RPC succeeded but returned no data, try direct insert
       try {
+        // Explicitly set created_at to current UTC timestamp for consistency
+        const nowFallback = new Date().toISOString();
+        
         const { data: insertData, error: insertError } = await supabase
           .from('activity_logs')
           .insert({
@@ -208,25 +193,23 @@ export const logActivity = async ({
             target_id: targetId,
             ip_address: ipAddress,
             user_agent: finalUserAgent,
+            created_at: nowFallback, // Explicitly set timestamp
           })
           .select('id')
           .single();
         
         if (insertError) {
-          console.error('[ActivityLog] Direct insert failed:', insertError);
           return { success: false, error: new Error('Failed to log activity: RPC returned no data and direct insert failed') };
         }
         
         return { success: true, logId: insertData.id };
       } catch (fallbackError) {
-        console.error('[ActivityLog] Fallback insert exception:', fallbackError);
         return { success: false, error: new Error('Failed to log activity: RPC returned no data and direct insert failed') };
       }
     }
 
     return { success: true, logId: data };
   } catch (error) {
-    console.error('[ActivityLog] Unexpected error:', error);
     return { success: false, error };
   }
 };
@@ -261,6 +244,11 @@ export const ActionTypes = {
   LOGOUT: 'logout',
   SYSTEM_CONFIG_CHANGED: 'system_config_changed',
   
+  // Blacklist management
+  BLACKLIST_ADDED: 'blacklist_added',
+  BLACKLIST_UPDATED: 'blacklist_updated',
+  BLACKLIST_DELETED: 'blacklist_deleted',
+  
   // Security
   UNAUTHORIZED_ACCESS_ATTEMPT: 'unauthorized_access_attempt',
   SUSPICIOUS_ACTIVITY: 'suspicious_activity',
@@ -273,6 +261,7 @@ export const ActionTypes = {
 export const ActionCategories = {
   USER_MANAGEMENT: 'user_management',
   INVOICE_MANAGEMENT: 'invoice_management',
+  BLACKLIST_MANAGEMENT: 'blacklist_management', // Note: Use 'security' if database constraint doesn't allow this
   SYSTEM: 'system',
   SECURITY: 'security',
 };

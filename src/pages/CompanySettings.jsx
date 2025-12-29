@@ -13,9 +13,12 @@ const CompanySettings = () => {
   const [saving, setSaving] = useState(false);
   const [vatEnabled, setVatEnabled] = useState(false);
   const [vatRate, setVatRate] = useState(21); // Default 21% (Latvia standard VAT rate)
+  // Track original values to compare what changed
+  const [originalVatEnabled, setOriginalVatEnabled] = useState(false);
+  const [originalVatRate, setOriginalVatRate] = useState(21);
   const [error, setError] = useState(null);
   const [hasChanges, setHasChanges] = useState(false);
-  const { isSuperAdmin } = useUserRole();
+  const { isSuperAdmin, userProfile } = useUserRole();
   const { message } = App.useApp();
 
   // Set document title
@@ -42,11 +45,15 @@ const CompanySettings = () => {
       }
 
       if (data) {
-        setVatEnabled(data.enabled || false);
-        setVatRate((data.rate || 0.21) * 100); // Convert decimal to percentage
+        const enabled = data.enabled || false;
+        const rate = (data.rate || 0.21) * 100; // Convert decimal to percentage
+        setVatEnabled(enabled);
+        setVatRate(rate);
+        // Store original values for comparison when saving
+        setOriginalVatEnabled(enabled);
+        setOriginalVatRate(rate);
       }
     } catch (error) {
-      console.error('Error fetching settings:', error);
       setError(`Kļūda ielādējot iestatījumus: ${error.message}`);
     } finally {
       setLoading(false);
@@ -80,24 +87,46 @@ const CompanySettings = () => {
         throw error;
       }
 
-      // Log the activity
+      // Determine what changed and build description
+      const enabledChanged = vatEnabled !== originalVatEnabled;
+      const rateChanged = vatRate !== originalVatRate;
+      
+      let description = '';
+      if (enabledChanged && rateChanged) {
+        description = `Mainīti PVN iestatījumi: ${originalVatEnabled ? 'ieslēgts' : 'izslēgts'} → ${vatEnabled ? 'ieslēgts' : 'izslēgts'}, likme ${originalVatRate}% → ${vatRate}%`;
+      } else if (enabledChanged) {
+        description = `${vatEnabled ? 'Ieslēgts' : 'Izslēgts'} PVN aprēķins (${vatRate}%)`;
+      } else if (rateChanged) {
+        description = `Mainīta PVN likme no ${originalVatRate}% uz ${vatRate}%`;
+      } else {
+        description = `Saglabāti PVN iestatījumi (${vatEnabled ? 'ieslēgts' : 'izslēgts'}, ${vatRate}%)`;
+      }
+      
+      // Log the activity with full details
       await logActivity({
         actionType: ActionTypes.SYSTEM_CONFIG_CHANGED,
         actionCategory: ActionCategories.SYSTEM,
-        description: `${vatEnabled ? 'Ieslēgts' : 'Izslēgts'} PVN aprēķins (${vatRate}%)`,
+        description: description,
         details: {
+          setting_type: 'vat',
           vat_enabled: vatEnabled,
           vat_rate: vatRate,
-          old_vat_enabled: !vatEnabled, // Approximate - we don't track old value here
+          old_vat_enabled: originalVatEnabled,
+          old_vat_rate: originalVatRate,
+          enabled_changed: enabledChanged,
+          rate_changed: rateChanged,
+          modified_by: userProfile?.username || 'Nezināms',
         },
         targetType: 'system',
-        targetId: 'vat_setting',
+        targetId: null, // System settings don't have a UUID, use null instead
       });
 
       message.success('Iestatījumi saglabāti!');
       setHasChanges(false);
+      // Update original values to new saved values
+      setOriginalVatEnabled(vatEnabled);
+      setOriginalVatRate(vatRate);
     } catch (error) {
-      console.error('Error saving settings:', error);
       setError(`Kļūda saglabājot iestatījumus: ${error.message}`);
       message.error('Neizdevās saglabāt iestatījumus');
     } finally {
@@ -330,5 +359,7 @@ const CompanySettings = () => {
 };
 
 export default CompanySettings;
+
+
 
 

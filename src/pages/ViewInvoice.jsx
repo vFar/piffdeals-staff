@@ -175,7 +175,6 @@ const ViewInvoice = () => {
         const { data: itemsData, error: itemsError } = itemsDataResult;
 
         if (itemsError) {
-          console.error('Error fetching items:', itemsError);
           return;
         }
 
@@ -198,7 +197,7 @@ const ViewInvoice = () => {
 
         setItems(transformedItems);
       }).catch(error => {
-        console.error('Error loading invoice details:', error);
+        // Error loading invoice details
       });
 
     } catch (error) {
@@ -735,7 +734,6 @@ const ViewInvoice = () => {
       // Now send the email using the same logic as handleSendEmail
       await handleSendEmailDirect(currentInvoice);
     } catch (error) {
-      console.error('Error preparing invoice to send:', error);
       message.error('Neizdevās sagatavot rēķinu nosūtīšanai');
       setPreparingToSend(false);
     }
@@ -831,11 +829,13 @@ const ViewInvoice = () => {
         }
         
         // Log invoice sent (first time) or resent
+        // First-time send is when status was 'draft', otherwise it's a resend (sent, pending, overdue)
         const isOwnInvoice = invoiceToSend.user_id === userProfile?.id;
-        const actionType = oldStatus === 'sent' ? ActionTypes.INVOICE_RESENT : ActionTypes.INVOICE_SENT;
-        const description = oldStatus === 'sent' 
-          ? `Nosūtīts rēķins ${invoiceToSend.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`
-          : `Nosūtīts rēķins ${invoiceToSend.invoice_number} klientam${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`;
+        const isFirstTimeSend = oldStatus === 'draft';
+        const actionType = isFirstTimeSend ? ActionTypes.INVOICE_SENT : ActionTypes.INVOICE_RESENT;
+        const description = isFirstTimeSend 
+          ? `Nosūtīts rēķins ${invoiceToSend.invoice_number} klientam${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`
+          : `Nosūtīts rēķins ${invoiceToSend.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`;
         
         await logInvoiceAction(
           actionType,
@@ -855,11 +855,9 @@ const ViewInvoice = () => {
         
         message.success(`E-pasts veiksmīgi nosūtīts uz ${invoiceToSend.customer_email}!`);
       } else {
-        console.error('Failed to update invoice status:', updateError);
         message.warning('E-pasts nosūtīts, bet neizdevās atjaunināt rēķina statusu');
       }
     } catch (error) {
-      console.error('Send email error:', error);
       
       if (error?.status === 429) {
         const minutes = Math.ceil((error.cooldownRemaining || 600) / 60);
@@ -1015,11 +1013,13 @@ const ViewInvoice = () => {
         }
         
         // Log invoice sent (first time) or resent
+        // First-time send is when status was 'draft', otherwise it's a resend (sent, pending, overdue)
         const isOwnInvoice = invoice.user_id === userProfile?.id;
-        const actionType = oldStatus === 'sent' ? ActionTypes.INVOICE_RESENT : ActionTypes.INVOICE_SENT;
-        const description = oldStatus === 'sent' 
-          ? `Nosūtīts rēķins ${invoice.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`
-          : `Nosūtīts rēķins ${invoice.invoice_number} klientam${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`;
+        const isFirstTimeSend = oldStatus === 'draft';
+        const actionType = isFirstTimeSend ? ActionTypes.INVOICE_SENT : ActionTypes.INVOICE_RESENT;
+        const description = isFirstTimeSend 
+          ? `Nosūtīts rēķins ${invoice.invoice_number} klientam${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`
+          : `Nosūtīts rēķins ${invoice.invoice_number} klientam vēlreiz${!isOwnInvoice ? ` (cita lietotāja rēķins)` : ''}`;
         
         await logInvoiceAction(
           actionType,

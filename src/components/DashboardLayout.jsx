@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback, memo } from 'react';
 import { Layout, Menu, Input, Button, Dropdown, Modal, App, Spin, Typography, Empty, Drawer } from 'antd';
 import {
   DashboardOutlined,
@@ -262,22 +262,23 @@ const DashboardLayout = ({ children }) => {
     }
   }, [isAdmin, roleLoading, cachedIsAdmin, roleProfile, currentUser]);
 
-  // Debounced search - reduced delay for better responsiveness
+  // Debounced search - optimized delay for better responsiveness
   useEffect(() => {
     // Clear previous timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
-    // Set new timeout for debounced search - reduced from 300ms to 150ms
+    // Set new timeout for debounced search - optimized to 200ms for balance
     if (searchQuery.trim().length >= 2) {
       // Show loading state immediately for better UX
       setIsSearching(true);
       searchTimeoutRef.current = setTimeout(() => {
         performSearch(searchQuery);
-      }, 150);
+      }, 200);
       setSelectedIndex(-1);
-    } else {
+    } else if (searchQuery.trim().length === 0) {
+      // Clear immediately if query is empty
       setSearchResults({ invoices: [], users: [], total: 0 });
       setShowSearchResults(false);
       setSelectedIndex(-1);

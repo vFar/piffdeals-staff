@@ -40,7 +40,6 @@ const PublicInvoice = () => {
         .maybeSingle();
 
       if (invoiceError) {
-        console.error('Error fetching invoice:', invoiceError);
         setNotFound(true);
         return;
       }
@@ -73,7 +72,6 @@ const PublicInvoice = () => {
       await fetchProductImages(itemsData || []);
 
     } catch (error) {
-      console.error('Error loading invoice:', error);
       antMessage.error('Neizdevās ielādēt rēķinu');
       setNotFound(true);
     } finally {
@@ -106,7 +104,6 @@ const PublicInvoice = () => {
 
       setProductsData(productsMap);
     } catch (error) {
-      console.error('Error fetching product images:', error);
       // Don't show error to user, just continue without images
     }
   };

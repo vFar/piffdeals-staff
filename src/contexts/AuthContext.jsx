@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import { logActivity, ActionTypes, ActionCategories } from '../services/activityLogService';
 
 const AuthContext = createContext(undefined);
 
@@ -96,14 +97,26 @@ export const AuthProvider = ({ children }) => {
    */
   const signOut = useCallback(async () => {
     try {
+      // Log logout activity BEFORE signing out (while user is still authenticated)
+      try {
+        await logActivity({
+          actionType: ActionTypes.LOGOUT,
+          actionCategory: ActionCategories.SYSTEM,
+          description: 'Iziet no sistēmas',
+          details: null,
+          targetType: 'system',
+          targetId: null,
+        });
+      } catch (logError) {
+        // Don't block logout if logging fails
+      }
+      
       // Use global scope to sign out from all devices
       const { error } = await supabase.auth.signOut({ scope: 'global' });
       if (error) {
-        console.error('Sign out error:', error);
         // Even if there's an error, clear local state
       }
     } catch (err) {
-      console.error('Sign out exception:', err);
       // Continue with local cleanup even if API call fails
     } finally {
       // Always clear local state
@@ -221,7 +234,7 @@ export const AuthProvider = ({ children }) => {
     if (error) throw error;
   };
 
-  const value = {
+  const value = useMemo(() => ({
     currentUser,
     userProfile,
     loading,
@@ -232,7 +245,7 @@ export const AuthProvider = ({ children }) => {
     updatePassword,
     updateUserMetadata,
     refreshProfile: () => currentUser && fetchUserProfile(currentUser.id),
-  };
+  }), [currentUser, userProfile, loading, signOut, resetPassword, updatePassword, updateUserMetadata, fetchUserProfile]);
 
   return (
     <AuthContext.Provider value={value}>

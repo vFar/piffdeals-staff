@@ -167,23 +167,27 @@ const SalesCharts = () => {
       title: 'Produkts',
       dataIndex: 'invoice_number',
       key: 'invoice_number',
+      width: '40%',
       render: (text, record) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
           <div style={{ 
-            width: '50px', 
+            minWidth: '80px', 
+            width: 'auto',
+            padding: '0 12px',
             height: '50px', 
             background: '#EBF3FF', 
             borderRadius: '8px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            flexShrink: 0,
           }}>
-            <Text style={{ fontSize: '12px', fontWeight: 600, color: '#0068FF' }}>
+            <Text style={{ fontSize: '12px', fontWeight: 600, color: '#0068FF', whiteSpace: 'nowrap' }}>
               #{text?.toString().replace(/^#+/, '') || ''}
             </Text>
           </div>
-          <div>
-            <Text style={{ fontSize: '14px', fontWeight: 500, color: '#212B36', display: 'block' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <Text style={{ fontSize: '14px', fontWeight: 500, color: '#212B36', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {record.customer_name || 'Nav norādīts'}
             </Text>
             <Text style={{ fontSize: '12px', color: '#637381' }}>Rēķins</Text>
@@ -195,6 +199,7 @@ const SalesCharts = () => {
       title: 'Kategorija',
       dataIndex: 'total',
       key: 'total',
+      width: '20%',
       render: (text) => (
         <Text style={{ color: '#637381', fontSize: '14px' }}>
           €{parseFloat(text || 0).toFixed(2)}
@@ -205,6 +210,7 @@ const SalesCharts = () => {
       title: 'Cena',
       dataIndex: 'total',
       key: 'price',
+      width: '20%',
       render: (text) => (
         <Text style={{ color: '#637381', fontSize: '14px' }}>
           €{parseFloat(text || 0).toFixed(2)}
@@ -215,6 +221,7 @@ const SalesCharts = () => {
       title: 'Statuss',
       dataIndex: 'status',
       key: 'status',
+      width: '20%',
       render: (status) => {
         const statusStyles = {
           draft: { background: '#f3f4f6', color: '#4b5563', text: 'Melnraksts' },
@@ -276,307 +283,111 @@ const SalesCharts = () => {
           gridTemplateColumns: 'repeat(12, 1fr)', 
           gap: '16px 24px'
         }}>
-          {/* Left Column */}
+          {/* Top Row: Monthly Sales Chart and Monthly Target */}
           <div style={{ 
             gridColumn: 'span 12',
-            display: 'flex',
-            flexDirection: 'column',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(12, 1fr)',
             gap: '24px'
           }}
-          className="left-column"
+          className="top-row"
           >
             {/* Monthly Sales Chart */}
-            <Card
-              style={{
-                borderRadius: '16px',
-                border: '1px solid #e2e8f0',
-                background: '#ffffff',
-                padding: isMobile ? '16px' : isTablet ? '18px 20px' : '20px 24px',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
+            <div style={{ 
+              gridColumn: 'span 12'
+            }}
+            className="monthly-sales-chart"
             >
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'space-between', 
-                marginBottom: isMobile ? '16px' : '20px',
-                flexWrap: isMobile ? 'wrap' : 'nowrap',
-                gap: isMobile ? '8px' : '0',
-              }}>
-                <h3 style={{ 
-                  fontSize: isMobile ? '16px' : isTablet ? '17px' : '18px', 
-                  fontWeight: 600, 
-                  color: '#212B36', 
-                  margin: 0 
-                }}>
-                  Mēneša pārdošana
-                </h3>
-              </div>
-              <div style={{ 
-                height: isMobile ? '250px' : isTablet ? '220px' : '195px', 
-                position: 'relative' 
-              }}>
-                {chartData.monthlySalesData.length > 0 ? (
-                  <BarChart
-                    width={undefined}
-                    height={isMobile ? 250 : isTablet ? 220 : 195}
-                    series={[
-                      {
-                        data: chartData.monthlySalesData.map(d => Math.max(0, d.income)),
-                        label: 'Ienākumi (€)',
-                      },
-                    ]}
-                    xAxis={[{
-                      scaleType: 'band',
-                      data: chartData.monthlySalesData.map(d => d.month),
-                    }]}
-                    yAxis={[{
-                      min: 0,
-                    }]}
-                    colors={['#0068FF']}
-                    sx={{
-                      '& .MuiBarElement-root': {
-                        borderRadius: '6px 6px 0 0',
-                      },
-                      '& .MuiChartsAxis-root': {
-                        fontSize: isMobile ? '10px' : '12px',
-                      },
-                    }}
-                  />
-                ) : (
-                  <div style={{
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#9ca3af',
-                    fontSize: isMobile ? '14px' : '16px',
-                    fontWeight: 500,
-                  }}>
-                    Pagaidām nav datu...
-                  </div>
-                )}
-              </div>
-            </Card>
-
-            {/* Statistics Area Chart */}
-            <Card
-              style={{
-                borderRadius: '16px',
-                border: '1px solid #e2e8f0',
-                background: '#ffffff',
-                padding: isMobile ? '16px' : isTablet ? '18px 20px' : '20px 24px',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
-            >
-              <div style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                gap: isMobile ? '16px' : '20px',
-                marginBottom: isMobile ? '20px' : '24px'
-              }}>
+              <Card
+                style={{
+                  borderRadius: '16px',
+                  border: '1px solid #e2e8f0',
+                  background: '#ffffff',
+                  padding: isMobile ? '16px' : isTablet ? '18px 20px' : '20px 24px',
+                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+                }}
+              >
                 <div style={{ 
                   display: 'flex', 
-                  flexDirection: 'column',
-                  gap: '8px',
-                  width: '100%'
-                }}
-                className="stats-header"
-                >
-                  <div style={{ width: '100%' }}>
-                    <h3 style={{ 
-                      fontSize: isMobile ? '16px' : isTablet ? '17px' : '18px', 
-                      fontWeight: 600, 
-                      color: '#212B36', 
-                      margin: 0, 
-                      marginBottom: '4px' 
-                    }}>
-                      Statistika
-                    </h3>
-                    <p style={{ 
-                      fontSize: isMobile ? '13px' : '14px', 
-                      color: '#637381', 
-                      margin: 0 
-                    }}>
-                      Mērķis, ko esat noteicis katram mēnesim
-                    </p>
-                  </div>
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'start', 
-                    gap: '12px',
-                    width: '100%',
-                    justifyContent: 'flex-end'
-                  }}
-                  className="time-period-buttons"
-                  >
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: '4px', 
-                      background: '#f1f5f9', 
-                      borderRadius: '8px', 
-                      padding: '4px' 
-                    }}>
-                      <button
-                        onClick={() => setTimePeriod('monthly')}
-                        style={{
-                          padding: '8px 12px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          borderRadius: '6px',
-                          border: 'none',
-                          background: timePeriod === 'monthly' ? '#ffffff' : 'transparent',
-                          color: timePeriod === 'monthly' ? '#212B36' : '#637381',
-                          boxShadow: timePeriod === 'monthly' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Mēneša
-                      </button>
-                      <button
-                        onClick={() => setTimePeriod('quarterly')}
-                        style={{
-                          padding: '8px 12px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          borderRadius: '6px',
-                          border: 'none',
-                          background: timePeriod === 'quarterly' ? '#ffffff' : 'transparent',
-                          color: timePeriod === 'quarterly' ? '#212B36' : '#637381',
-                          boxShadow: timePeriod === 'quarterly' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Ceturkšņa
-                      </button>
-                      <button
-                        onClick={() => setTimePeriod('annually')}
-                        style={{
-                          padding: '8px 12px',
-                          fontSize: '14px',
-                          fontWeight: 500,
-                          borderRadius: '6px',
-                          border: 'none',
-                          background: timePeriod === 'annually' ? '#ffffff' : 'transparent',
-                          color: timePeriod === 'annually' ? '#212B36' : '#637381',
-                          boxShadow: timePeriod === 'annually' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Gada
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div style={{ 
-                height: isMobile ? '300px' : isTablet ? '320px' : '325px', 
-                position: 'relative' 
-              }}>
-                {combinedStatisticsData.length > 0 ? (
-                  <LineChart
-                    width={undefined}
-                    height={isMobile ? 300 : isTablet ? 320 : 325}
-                    series={[
-                      {
-                        data: combinedStatisticsData.map(d => d.sales),
-                        label: 'Pārdošana',
-                        area: true,
-                        curve: 'monotone',
-                      },
-                      {
-                        data: combinedStatisticsData.map(d => d.revenue),
-                        label: 'Ienākumi',
-                        area: true,
-                        curve: 'monotone',
-                      },
-                ]}
-                xAxis={[{
-                  scaleType: 'point',
-                  data: combinedStatisticsData.map(d => d.month),
-                }]}
-                colors={['#0068FF', '#83AEEA']}
-                sx={{
-                  '& .MuiChartsAxis-root': {
-                    fontSize: isMobile ? '10px' : '12px',
-                  },
-                }}
-                  />
-                ) : (
-                  <div style={{
-                    height: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#9ca3af',
-                    fontSize: isMobile ? '14px' : '16px',
-                    fontWeight: 500,
-                  }}>
-                    Pagaidām nav datu...
-                  </div>
-                )}
-              </div>
-            </Card>
-
-            {/* Recent Orders Table */}
-            <Card
-              style={{
-                borderRadius: '16px',
-                border: '1px solid #e2e8f0',
-                background: '#ffffff',
-                padding: isMobile ? '16px' : '16px 20px 12px',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
-            >
-              <div style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                gap: '8px',
-                marginBottom: '16px'
-              }}
-              className="orders-header"
-              >
-                <div style={{ width: '100%' }}>
+                  alignItems: 'center', 
+                  justifyContent: 'space-between', 
+                  marginBottom: isMobile ? '16px' : '20px',
+                  flexWrap: isMobile ? 'wrap' : 'nowrap',
+                  gap: isMobile ? '8px' : '0',
+                }}>
                   <h3 style={{ 
                     fontSize: isMobile ? '16px' : isTablet ? '17px' : '18px', 
                     fontWeight: 600, 
                     color: '#212B36', 
                     margin: 0 
                   }}>
-                    Pēdējie pasūtījumi
+                    Mēneša pārdošana
                   </h3>
                 </div>
+                <div style={{ 
+                  height: isMobile ? '250px' : isTablet ? '220px' : '280px', 
+                  position: 'relative' 
+                }}>
+                  {chartData.monthlySalesData.length > 0 ? (
+                    <BarChart
+                      width={undefined}
+                      height={isMobile ? 250 : isTablet ? 220 : 280}
+                      series={[
+                        {
+                          data: chartData.monthlySalesData.map(d => Math.max(0, d.income)),
+                          label: 'Ienākumi (€)',
+                        },
+                      ]}
+                      xAxis={[{
+                        scaleType: 'band',
+                        data: chartData.monthlySalesData.map(d => d.month),
+                      }]}
+                      yAxis={[{
+                        min: 0,
+                      }]}
+                      colors={['#0068FF']}
+                      sx={{
+                        '& .MuiBarElement-root': {
+                          borderRadius: '6px 6px 0 0',
+                        },
+                        '& .MuiChartsAxis-root': {
+                          fontSize: isMobile ? '10px' : '12px',
+                        },
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#9ca3af',
+                      fontSize: isMobile ? '14px' : '16px',
+                      fontWeight: 500,
+                    }}>
+                      Pagaidām nav datu...
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
 
-              </div>
-              <Table
-                columns={orderColumns}
-                dataSource={chartData.recentOrders}
-                pagination={false}
-              />
-            </Card>
-          </div>
-
-          {/* Right Column */}
-          <div style={{ 
-            gridColumn: 'span 12',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '24px'
-          }}
-          className="right-column"
-          >
             {/* Monthly Target Card */}
-            <Card
-              style={{
-                borderRadius: '16px',
-                border: '1px solid #e2e8f0',
-                background: '#ffffff',
-                overflow: 'hidden',
-                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-              }}
+            <div style={{ 
+              gridColumn: 'span 12'
+            }}
+            className="monthly-target-card"
             >
-
+              <Card
+                style={{
+                  borderRadius: '16px',
+                  border: '1px solid #e2e8f0',
+                  background: '#ffffff',
+                  overflow: 'hidden',
+                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+                  padding: isMobile ? '16px' : isTablet ? '18px 20px' : '20px 24px',
+                }}
+              >
                 <div style={{ 
                   display: 'flex', 
                   justifyContent: 'space-between', 
@@ -602,7 +413,6 @@ const SalesCharts = () => {
                       Mērķis, ko esat noteicis katram mēnesim
                     </p>
                   </div>
-                  
                 </div>
                 <div style={{ position: 'relative', marginTop: isMobile ? '20px' : '24px' }}>
                   <div style={{ 
@@ -731,18 +541,228 @@ const SalesCharts = () => {
                     </p>
                   </div>
                 </div>
-              
+              </Card>
+            </div>
+          </div>
+
+          {/* Statistics Area Chart - Full Width */}
+          <div style={{ 
+            gridColumn: 'span 12'
+          }}
+          className="statistics-chart"
+          >
+            <Card
+              style={{
+                borderRadius: '16px',
+                border: '1px solid #e2e8f0',
+                background: '#ffffff',
+                padding: isMobile ? '16px' : isTablet ? '18px 20px' : '20px 24px',
+                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+              }}
+            >
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                gap: isMobile ? '16px' : '20px',
+                marginBottom: isMobile ? '20px' : '24px'
+              }}>
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  gap: '8px',
+                  width: '100%'
+                }}
+                className="stats-header"
+                >
+                  <div style={{ width: '100%' }}>
+                    <h3 style={{ 
+                      fontSize: isMobile ? '16px' : isTablet ? '17px' : '18px', 
+                      fontWeight: 600, 
+                      color: '#212B36', 
+                      margin: 0, 
+                      marginBottom: '4px' 
+                    }}>
+                      Statistika
+                    </h3>
+                    <p style={{ 
+                      fontSize: isMobile ? '13px' : '14px', 
+                      color: '#637381', 
+                      margin: 0 
+                    }}>
+                      Mērķis, ko esat noteicis katram mēnesim
+                    </p>
+                  </div>
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'start', 
+                    gap: '12px',
+                    width: '100%',
+                    justifyContent: 'flex-end'
+                  }}
+                  className="time-period-buttons"
+                  >
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '4px', 
+                      background: '#f1f5f9', 
+                      borderRadius: '8px', 
+                      padding: '4px' 
+                    }}>
+                      <button
+                        onClick={() => setTimePeriod('monthly')}
+                        style={{
+                          padding: '8px 12px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: timePeriod === 'monthly' ? '#ffffff' : 'transparent',
+                          color: timePeriod === 'monthly' ? '#212B36' : '#637381',
+                          boxShadow: timePeriod === 'monthly' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Mēneša
+                      </button>
+                      <button
+                        onClick={() => setTimePeriod('quarterly')}
+                        style={{
+                          padding: '8px 12px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: timePeriod === 'quarterly' ? '#ffffff' : 'transparent',
+                          color: timePeriod === 'quarterly' ? '#212B36' : '#637381',
+                          boxShadow: timePeriod === 'quarterly' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Ceturkšņa
+                      </button>
+                      <button
+                        onClick={() => setTimePeriod('annually')}
+                        style={{
+                          padding: '8px 12px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: timePeriod === 'annually' ? '#ffffff' : 'transparent',
+                          color: timePeriod === 'annually' ? '#212B36' : '#637381',
+                          boxShadow: timePeriod === 'annually' ? '0 1px 2px 0 rgba(0, 0, 0, 0.05)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Gada
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div style={{ 
+                height: isMobile ? '300px' : isTablet ? '320px' : '350px', 
+                position: 'relative' 
+              }}>
+                {combinedStatisticsData.length > 0 ? (
+                  <LineChart
+                    width={undefined}
+                    height={isMobile ? 300 : isTablet ? 320 : 350}
+                    series={[
+                      {
+                        data: combinedStatisticsData.map(d => d.sales),
+                        label: 'Pārdošana',
+                        area: true,
+                        curve: 'monotone',
+                      },
+                      {
+                        data: combinedStatisticsData.map(d => d.revenue),
+                        label: 'Ienākumi',
+                        area: true,
+                        curve: 'monotone',
+                      },
+                ]}
+                xAxis={[{
+                  scaleType: 'point',
+                  data: combinedStatisticsData.map(d => d.month),
+                }]}
+                colors={['#0068FF', '#83AEEA']}
+                sx={{
+                  '& .MuiChartsAxis-root': {
+                    fontSize: isMobile ? '10px' : '12px',
+                  },
+                }}
+                  />
+                ) : (
+                  <div style={{
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#9ca3af',
+                    fontSize: isMobile ? '14px' : '16px',
+                    fontWeight: 500,
+                  }}>
+                    Pagaidām nav datu...
+                  </div>
+                )}
+              </div>
             </Card>
           </div>
+        </div>
+
+        {/* Recent Orders Table - Full Width */}
+        <div style={{ 
+          width: '100%',
+          marginTop: '24px'
+        }}>
+          <Card
+            style={{
+              borderRadius: '16px',
+              border: '1px solid #e2e8f0',
+              background: '#ffffff',
+              padding: isMobile ? '16px' : '16px 20px 12px',
+              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+            }}
+          >
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: '8px',
+              marginBottom: '16px'
+            }}
+            className="orders-header"
+            >
+              <div style={{ width: '100%' }}>
+                <h3 style={{ 
+                  fontSize: isMobile ? '16px' : isTablet ? '17px' : '18px', 
+                  fontWeight: 600, 
+                  color: '#212B36', 
+                  margin: 0 
+                }}>
+                  Pēdējie pasūtījumi
+                </h3>
+              </div>
+
+            </div>
+            <Table
+              columns={orderColumns}
+              dataSource={chartData.recentOrders}
+              pagination={false}
+              style={{ width: '100%' }}
+              scroll={{ x: 'max-content' }}
+            />
+          </Card>
         </div>
 
         {/* Responsive Styles */}
         <style>{`
           @media (min-width: 1280px) {
-            .left-column {
+            .monthly-sales-chart {
               grid-column: span 7 !important;
             }
-            .right-column {
+            .monthly-target-card {
               grid-column: span 5 !important;
             }
           }

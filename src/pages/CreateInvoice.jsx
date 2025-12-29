@@ -17,7 +17,7 @@ import {
   Tooltip,
   Typography
 } from 'antd';
-import { DeleteOutlined, PlusOutlined, SaveOutlined, FileTextOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, SaveOutlined, FileTextOutlined, InfoCircleOutlined, WarningOutlined } from '@ant-design/icons';
 import DashboardLayout from '../components/DashboardLayout';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,7 +44,14 @@ const CreateInvoice = ({ mode = 'create' }) => {
   const [existingInvoice, setExistingInvoice] = useState(null);
   const [saveTemplateModalVisible, setSaveTemplateModalVisible] = useState(false);
   const [templateName, setTemplateName] = useState('');
+  const [blacklistWarningVisible, setBlacklistWarningVisible] = useState(false);
+  const [blacklistMatch, setBlacklistMatch] = useState(null);
+  const [pendingFormValues, setPendingFormValues] = useState(null);
   const templateLoadedRef = useRef(false);
+  
+  // VAT settings state
+  const [vatEnabled, setVatEnabled] = useState(false);
+  const [vatRate, setVatRate] = useState(0);
   
   // Set document title
   useEffect(() => {
@@ -66,7 +73,7 @@ const CreateInvoice = ({ mode = 'create' }) => {
   // Form state
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [items, setItems] = useState([
-    { id: 1, productHandle: '', name: '', quantity: 1, price: 0, total: 0, stock: null }
+    { id: 1, type: 'product', productHandle: '', name: '', quantity: 1, price: 0, total: 0, stock: null, showQuantity: true }
   ]);
 
   useEffect(() => {
@@ -76,6 +83,7 @@ const CreateInvoice = ({ mode = 'create' }) => {
       generateInvoiceNumber();
     }
     fetchProducts();
+    fetchVatSettings();
     // Initialize form with default values for create mode
     if (mode === 'create') {
       form.setFieldsValue({
@@ -92,6 +100,84 @@ const CreateInvoice = ({ mode = 'create' }) => {
       message.success('Parauga dati ielādēti');
     }
   }, [mode, location.state]);
+
+  // Handle scanned product from global barcode scanner
+  useEffect(() => {
+    if (mode === 'create' && location.state?.scannedProduct && !templateLoadedRef.current) {
+      const scannedProduct = location.state.scannedProduct;
+      
+      // Helper function to add scanned product
+      const addScannedProduct = () => {
+        setItems(currentItems => {
+          // Check if product is already in items
+          const existingItem = currentItems.find(item => item.productHandle === scannedProduct.productHandle);
+          
+          if (existingItem) {
+            // Increment quantity if product already exists
+            const stockLimit = existingItem.stock !== null ? existingItem.stock : MAX_QUANTITY;
+            const maxQty = Math.min(stockLimit, MAX_QUANTITY);
+            const newQuantity = Math.min(existingItem.quantity + 1, maxQty);
+            
+            if (newQuantity === existingItem.quantity && existingItem.quantity >= maxQty) {
+              message.warning(`Maksimālais daudzums sasniegts: ${maxQty}`);
+              return currentItems; // Return unchanged items
+            }
+            
+            // Update the existing item's quantity
+            const updatedItems = currentItems.map(item => {
+              if (item.id === existingItem.id) {
+                return {
+                  ...item,
+                  quantity: newQuantity,
+                  total: calculateItemTotal(newQuantity, item.price),
+                };
+              }
+              return item;
+            });
+            
+            message.success(`${scannedProduct.name} - daudzums palielināts uz ${newQuantity}`);
+            return updatedItems;
+          } else {
+            // Add new item
+            const newId = Math.max(...currentItems.map(i => i.id), 0) + 1;
+            const newItem = {
+              id: newId,
+              type: 'product',
+              productHandle: scannedProduct.productHandle,
+              name: scannedProduct.name,
+              quantity: scannedProduct.quantity || 1,
+              price: scannedProduct.price,
+              total: calculateItemTotal(scannedProduct.quantity || 1, scannedProduct.price),
+              stock: scannedProduct.stock,
+              showQuantity: true,
+            };
+            
+            message.success(`${scannedProduct.name} pievienots`);
+            return [...currentItems, newItem];
+          }
+        });
+      };
+      
+      // Wait for products to load before adding scanned product
+      if (loadingProducts) {
+        // Products are still loading, wait a bit
+        const checkProducts = setInterval(() => {
+          if (!loadingProducts && availableProducts.length > 0) {
+            clearInterval(checkProducts);
+            addScannedProduct();
+          }
+        }, 100);
+        
+        return () => clearInterval(checkProducts);
+      } else if (availableProducts.length > 0) {
+        addScannedProduct();
+      }
+      
+      // Clear the scanned product from location state to prevent re-adding
+      // Use replace to update location state without adding to history
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [mode, location.state, loadingProducts, availableProducts.length, navigate, message]);
 
   // Keep refs in sync with state for barcode scanner
   useEffect(() => {
@@ -221,6 +307,23 @@ const CreateInvoice = ({ mode = 'create' }) => {
     };
   }, []); // Empty deps - we use refs to access current values
 
+  const fetchVatSettings = async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_vat_setting');
+      
+      if (error) {
+        return;
+      }
+      
+      if (data) {
+        setVatEnabled(data.enabled || false);
+        setVatRate((data.rate || 0) * 100); // Convert decimal to percentage
+      }
+    } catch (error) {
+      // Error fetching VAT settings
+    }
+  };
+
   const loadExistingInvoice = async () => {
     try {
       setLoadingInvoice(true);
@@ -309,16 +412,21 @@ const CreateInvoice = ({ mode = 'create' }) => {
         notes: invoice.notes,
       });
 
-      // Set items
-      const loadedItems = invoiceItems.map((item, index) => ({
-        id: index + 1,
-        productHandle: item.product_id || '',
-        name: item.product_name,
-        quantity: item.quantity,
-        price: parseFloat(item.unit_price),
-        total: parseFloat(item.total),
-        stock: null, // Will be loaded when products are fetched
-      }));
+      // Set items - determine type based on whether product_id exists
+      const loadedItems = invoiceItems.map((item, index) => {
+        const isProduct = !!item.product_id;
+        return {
+          id: index + 1,
+          type: isProduct ? 'product' : 'custom',
+          productHandle: item.product_id || '',
+          name: item.product_name,
+          quantity: item.quantity,
+          price: parseFloat(item.unit_price),
+          total: parseFloat(item.total),
+          stock: null, // Will be loaded when products are fetched
+          showQuantity: isProduct || item.quantity > 1, // Show quantity for products or if custom item has qty > 1
+        };
+      });
 
       setItems(loadedItems);
 
@@ -368,10 +476,10 @@ const CreateInvoice = ({ mode = 'create' }) => {
     setInvoiceNumber(newInvoiceNumber);
   };
 
-  // Calculate due date automatically (issue date + 5 days)
+  // Calculate due date automatically (issue date + 3 days)
   const calculateDueDate = (issueDateValue) => {
-    if (!issueDateValue) return dayjs().add(5, 'day');
-    return issueDateValue.add(5, 'day');
+    if (!issueDateValue) return dayjs().add(3, 'day');
+    return issueDateValue.add(3, 'day');
   };
   
   // Get current issue date from form
@@ -521,9 +629,11 @@ const CreateInvoice = ({ mode = 'create' }) => {
     }));
   };
 
-  const addItem = () => {
+  const addItem = (type = 'product') => {
     const newId = Math.max(...items.map(i => i.id), 0) + 1;
-    setItems([...items, { id: newId, productHandle: '', name: '', quantity: 1, price: 0, total: 0, stock: null }]);
+    // For custom items, showQuantity defaults to false (quantity fixed at 1)
+    // For products, showQuantity is always true
+    setItems([...items, { id: newId, type, productHandle: '', name: '', quantity: 1, price: 0, total: 0, stock: null, showQuantity: type === 'product' }]);
   };
 
   const removeItem = (id) => {
@@ -536,8 +646,31 @@ const CreateInvoice = ({ mode = 'create' }) => {
     return items.reduce((sum, item) => sum + parseFloat(item.total || 0), 0);
   };
 
+  const calculateTaxAmount = () => {
+    if (!vatEnabled) return 0;
+    const subtotal = calculateSubtotal();
+    return (subtotal * (vatRate / 100));
+  };
+
   const calculateTotal = () => {
-    return calculateSubtotal(); // No tax for now
+    const subtotal = calculateSubtotal();
+    const taxAmount = calculateTaxAmount();
+    return subtotal + taxAmount;
+  };
+
+  // Handle confirmed save after blacklist warning
+  const handleConfirmedSave = async () => {
+    setBlacklistWarningVisible(false);
+    setBlacklistMatch(null);
+    setPendingFormValues(null);
+    // Proceed with save, skipping blacklist check
+    await handleSave(true);
+  };
+
+  const handleCancelBlacklistWarning = () => {
+    setBlacklistWarningVisible(false);
+    setBlacklistMatch(null);
+    setPendingFormValues(null);
   };
 
   const handleSaveAsTemplate = async () => {
@@ -577,16 +710,66 @@ const CreateInvoice = ({ mode = 'create' }) => {
     }
   };
 
-  const handleSave = async () => {
+  // Check if customer is in blacklist (by email OR name)
+  const checkBlacklist = async (customerEmail, customerName) => {
+    try {
+      const emailLower = customerEmail?.toLowerCase();
+      const nameLower = customerName?.toLowerCase();
+      
+      // Check both email and name against blacklist
+      const { data, error } = await supabase
+        .from('customer_blacklist')
+        .select('*');
+      
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        // Find match by email or name (case-insensitive)
+        const match = data.find(record => 
+          record.customer_email?.toLowerCase() === emailLower ||
+          record.customer_name?.toLowerCase() === nameLower
+        );
+        
+        return match || null;
+      }
+      
+      return null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const handleSave = async (skipBlacklistCheck = false) => {
     // Validate items
-    if (items.some(item => !item.name || item.price <= 0)) {
-      message.error('Aizpildiet visus laukus');
+    const invalidItems = items.some(item => {
+      if (item.type === 'product') {
+        // Product items must have a product selected (productHandle) and price > 0
+        return !item.productHandle || item.price < 0;
+      } else {
+        // Custom items must have a name entered and price >= 0
+        return !item.name || !item.name.trim() || item.price < 0;
+      }
+    });
+    
+    if (invalidItems) {
+      message.error('Aizpildiet visus produktu/pakalpojumu laukus');
       return;
     }
 
     try {
       // Trigger form validation - this will show red borders if validation fails
       const values = await form.validateFields();
+      
+      // Check blacklist before saving (only if not skipping)
+      if (!skipBlacklistCheck) {
+        const blacklistRecord = await checkBlacklist(values.clientEmail, values.clientName);
+        if (blacklistRecord) {
+          setBlacklistMatch(blacklistRecord);
+          setPendingFormValues(values);
+          setBlacklistWarningVisible(true);
+          return; // Stop and wait for user confirmation
+        }
+      }
       
       setLoading(true);
 
@@ -608,8 +791,8 @@ const CreateInvoice = ({ mode = 'create' }) => {
         issue_date: issueDate.format('YYYY-MM-DD'),
         due_date: dueDate.format('YYYY-MM-DD'),
         subtotal: calculateSubtotal(),
-        tax_rate: 0,
-        tax_amount: 0,
+        tax_rate: vatEnabled ? vatRate / 100 : 0, // Store as decimal (e.g., 0.21)
+        tax_amount: calculateTaxAmount(),
         total: calculateTotal(),
         status: 'draft',
         notes: formValues.notes || '',
@@ -662,6 +845,7 @@ const CreateInvoice = ({ mode = 'create' }) => {
         quantity: item.quantity,
         unit_price: item.price,
         total: item.total,
+        stock_snapshot: item.stock !== undefined ? item.stock : null, // Store stock snapshot for backend validation
       }));
 
       const { error: itemsError } = await supabase
@@ -717,7 +901,16 @@ const CreateInvoice = ({ mode = 'create' }) => {
         return;
       }
       setLoading(false);
-      message.error('Neizdevās saglabāt rēķinu');
+      
+      // Check for backend validation errors (quantity limits)
+      const errorMessage = error?.message || error?.error?.message || '';
+      if (errorMessage.includes('Quantity cannot exceed 999') || errorMessage.includes('quantity > 999')) {
+        message.error('Daudzums nedrīkst pārsniegt 999');
+      } else if (errorMessage.includes('Quantity cannot exceed available stock') || errorMessage.includes('stock')) {
+        message.error('Daudzums nedrīkst pārsniegt pieejamo krājumu');
+      } else {
+        message.error('Neizdevās saglabāt rēķinu' + (errorMessage ? `: ${errorMessage}` : ''));
+      }
     }
   };
 
@@ -734,6 +927,35 @@ const CreateInvoice = ({ mode = 'create' }) => {
           padding: 0.5rem 1rem !important; /* py-2 px-4 */
           color: #262626 !important;
           font-size: 14px !important;
+          box-sizing: border-box !important;
+        }
+        
+        /* Ensure Select and Input have same width */
+        .ant-select,
+        .ant-input {
+          width: 100% !important;
+          box-sizing: border-box !important;
+          min-width: 0 !important;
+        }
+        
+        /* Ensure Select selector matches Input width exactly */
+        .ant-select .ant-select-selector {
+          width: 100% !important;
+          box-sizing: border-box !important;
+          min-width: 0 !important;
+        }
+        
+        /* Ensure Select wrapper doesn't add extra width */
+        .ant-select {
+          display: block !important;
+          width: 100% !important;
+          min-width: 0 !important;
+        }
+        
+        /* Remove any margins/padding that could affect width */
+        .ant-select,
+        .ant-input {
+          margin: 0 !important;
         }
         
         .ant-input-textarea textarea {
@@ -986,7 +1208,7 @@ const CreateInvoice = ({ mode = 'create' }) => {
                               value={dueDate.format('DD.MM.YYYY')}
                               disabled
                               style={{ background: '#f3f4f6', color: '#6b7280' }}
-                              suffix={<span style={{ fontSize: 12, color: '#9ca3af' }}>(+5 dienas)</span>}
+                              suffix={<span style={{ fontSize: 12, color: '#9ca3af' }}>(+3 dienas)</span>}
                             />
                           );
                         }}
@@ -1001,146 +1223,246 @@ const CreateInvoice = ({ mode = 'create' }) => {
             {/* Items Table */}
             <div style={{ marginBottom: 24 }}>
               <h3 style={{ fontSize: 18, fontWeight: 600, color: '#111827', marginBottom: 16 }}>
-                Produkti
+                Rēķina pozīcijas
               </h3>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
-                  <thead>
-                    <tr style={{ background: '#f9fafb' }}>
-                      <th style={{ padding: 12, textAlign: 'left', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', borderTop: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb' }}>
-                        Produkts
-                      </th>
-                      <th style={{ padding: 12, textAlign: 'center', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', width: 120, borderTop: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb' }}>
-                        Daudzums
-                      </th>
-                      <th style={{ padding: 12, textAlign: 'right', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', width: 150, borderTop: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb' }}>
-                        Cena (€)
-                      </th>
-                      <th style={{ padding: 12, textAlign: 'right', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', width: 150, borderTop: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb' }}>
-                        Kopā (€)
-                      </th>
-                      <th style={{ padding: 12, width: 60, borderTop: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb' }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((item, index) => (
-                      <tr key={item.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <td style={{ padding: 12 }}>
-                          <Select
-                            showSearch
-                            style={{ width: '100%' }}
-                            placeholder="Izvēlieties produktu"
-                            value={item.productHandle || undefined}
-                            onChange={(value) => handleProductSelect(item.id, value)}
-                            loading={loadingProducts}
-                            filterOption={(input, option) =>
-                              (option.label || '').toLowerCase().indexOf(input.toLowerCase()) >= 0
-                            }
-                            optionLabelProp="label"
-                          >
-                            {getAvailableProductsForItem(item.id).map(product => {
-                              const imageUrl = product.pictures?.[0]?.url || null;
-                              const title = getProductTitle(product);
-                              const price = getProductPrice(product).toFixed(2);
-                              const stock = product.stock;
-                              const stockText = stock === null ? 'Neierobežots' : `Noliktavā: ${stock}`;
-                              const stockColor = stock === null ? '#10b981' : (stock < 5 ? '#ef4444' : '#6b7280');
-                              
-                              return (
-                                <Option 
-                                  key={product.handle} 
-                                  value={product.handle}
-                                  label={`${title} - €${price}`}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                    {imageUrl && (
-                                      <img 
-                                        src={imageUrl} 
-                                        alt={title}
-                                        style={{ 
-                                          width: 40, 
-                                          height: 40, 
-                                          objectFit: 'cover', 
-                                          borderRadius: 4,
-                                          border: '1px solid #e5e7eb'
-                                        }} 
-                                      />
-                                    )}
-                                    <div style={{ flex: 1 }}>
-                                      <div style={{ fontWeight: 500, color: '#111827' }}>{title}</div>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                                        <span style={{ color: '#6b7280' }}>€{price}</span>
-                                        <span style={{ color: '#d1d5db' }}>•</span>
-                                        <span style={{ color: stockColor, fontWeight: 500 }}>{stockText}</span>
-                                      </div>
+              
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+                {/* Table Header */}
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: '90px 1fr 100px 120px 100px 50px',
+                  background: '#f9fafb',
+                  borderBottom: '1px solid #e5e7eb',
+                  padding: '12px 16px',
+                  gap: 12,
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase' }}>Tips</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase' }}>Nosaukums</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', textAlign: 'center' }}>Daudzums</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', textAlign: 'right' }}>Cena</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', textAlign: 'right' }}>Kopā</div>
+                  <div></div>
+                </div>
+
+                {/* Table Rows */}
+                {items.map((item, index) => (
+                  <div 
+                    key={item.id}
+                    style={{ 
+                      display: 'grid', 
+                      gridTemplateColumns: '90px 1fr 100px 120px 100px 50px',
+                      padding: '16px',
+                      gap: 12,
+                      alignItems: 'center',
+                      borderBottom: index < items.length - 1 ? '1px solid #e5e7eb' : 'none',
+                      background: '#fff',
+                    }}
+                  >
+                    {/* Type Badge */}
+                    <div>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          padding: '4px 8px',
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          textTransform: 'uppercase',
+                          background: item.type === 'product' ? 'rgba(0, 104, 255, 0.1)' : 'rgba(217, 119, 6, 0.1)',
+                          color: item.type === 'product' ? '#0068FF' : '#b45309',
+                        }}
+                      >
+                        {item.type === 'product' ? 'Produkts' : 'Cits'}
+                      </span>
+                    </div>
+
+                    {/* Name / Product Select */}
+                    <div style={{ width: '100%' }}>
+                      {item.type === 'product' ? (
+                        <Select
+                          showSearch
+                          style={{ width: '100%' }}
+                          placeholder="Izvēlieties produktu..."
+                          value={item.productHandle || undefined}
+                          onChange={(value) => handleProductSelect(item.id, value)}
+                          loading={loadingProducts}
+                          filterOption={(input, option) =>
+                            (option.label || '').toLowerCase().indexOf(input.toLowerCase()) >= 0
+                          }
+                          optionLabelProp="label"
+                        >
+                          {getAvailableProductsForItem(item.id).map(product => {
+                            const imageUrl = product.pictures?.[0]?.url || null;
+                            const title = getProductTitle(product);
+                            const price = getProductPrice(product).toFixed(2);
+                            const stock = product.stock;
+                            const stockText = stock === null ? 'Neierobežots' : `Noliktavā: ${stock}`;
+                            const stockColor = stock === null ? '#10b981' : (stock < 5 ? '#ef4444' : '#6b7280');
+                            
+                            return (
+                              <Option 
+                                key={product.handle} 
+                                value={product.handle}
+                                label={`${title} - €${price}`}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                  {imageUrl && (
+                                    <img 
+                                      src={imageUrl} 
+                                      alt={title}
+                                      style={{ 
+                                        width: 40, 
+                                        height: 40, 
+                                        objectFit: 'cover', 
+                                        borderRadius: 4,
+                                        border: '1px solid #e5e7eb'
+                                      }} 
+                                    />
+                                  )}
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontWeight: 500, color: '#111827' }}>{title}</div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                                      <span style={{ color: '#6b7280' }}>€{price}</span>
+                                      <span style={{ color: '#d1d5db' }}>•</span>
+                                      <span style={{ color: stockColor, fontWeight: 500 }}>{stockText}</span>
                                     </div>
                                   </div>
-                                </Option>
-                              );
-                            })}
-                          </Select>
-                        </td>
-                        <td style={{ padding: 12 }}>
-                          <div>
-                            <InputNumber
-                              min={1}
-                              max={item.stock !== null ? Math.min(item.stock, MAX_QUANTITY) : MAX_QUANTITY}
-                              value={item.quantity}
-                              onChange={(value) => {
-                                const stockLimit = item.stock !== null ? item.stock : MAX_QUANTITY;
-                                const maxQty = Math.min(stockLimit, MAX_QUANTITY);
-                                const finalValue = Math.min(value || 1, maxQty);
-                                handleItemChange(item.id, 'quantity', finalValue);
-                              }}
-                              style={{ width: '100%' }}
-                            />
-                            {item.stock !== null ? (
-                              <div style={{ fontSize: 11, color: item.stock < 5 ? '#ef4444' : '#6b7280', marginTop: 4 }}>
-                                Max: {Math.min(item.stock, MAX_QUANTITY)}
-                              </div>
-                            ) : (
-                              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
-                                Max: {MAX_QUANTITY}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td style={{ padding: 12 }}>
+                                </div>
+                              </Option>
+                            );
+                          })}
+                        </Select>
+                      ) : (
+                        <Input
+                          placeholder="Ievadiet nosaukumu (piem. Piegādes maksa)"
+                          value={item.name}
+                          onChange={(e) => handleItemChange(item.id, 'name', e.target.value)}
+                          style={{ width: '100%', height: '32px', boxSizing: 'border-box' }}
+                        />
+                      )}
+                    </div>
+
+                    {/* Quantity */}
+                    <div style={{ position: 'relative' }}>
+                      {item.type === 'product' || item.showQuantity ? (
+                        <>
                           <InputNumber
-                            min={0}
-                            step={0.01}
-                            value={item.price}
-                            onChange={(value) => handleItemChange(item.id, 'price', value || 0)}
+                            min={1}
+                            max={item.type === 'product' && item.stock !== null ? Math.min(item.stock, MAX_QUANTITY) : MAX_QUANTITY}
+                            value={item.quantity}
+                            onChange={(value) => {
+                              const stockLimit = item.type === 'product' && item.stock !== null ? item.stock : MAX_QUANTITY;
+                              const maxQty = Math.min(stockLimit, MAX_QUANTITY);
+                              const finalValue = Math.min(value || 1, maxQty);
+                              handleItemChange(item.id, 'quantity', finalValue);
+                            }}
                             style={{ width: '100%' }}
-                            prefix="€"
                           />
-                        </td>
-                        <td style={{ padding: 12, textAlign: 'right', fontSize: 16, fontWeight: 500, color: '#111827' }}>
-                          €{parseFloat(item.total).toFixed(2)}
-                        </td>
-                        <td style={{ padding: 12, textAlign: 'center' }}>
-                          <Button
-                            type="text"
-                            danger
-                            icon={<DeleteOutlined />}
-                            onClick={() => removeItem(item.id)}
-                            disabled={items.length === 1}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          {item.type === 'product' && item.stock !== null && (
+                            <div style={{ fontSize: 10, color: item.stock < 5 ? '#ef4444' : '#9ca3af', marginTop: 2, textAlign: 'center' }}>
+                              max {Math.min(item.stock, MAX_QUANTITY)}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div 
+                          style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            height: 32,
+                            color: '#9ca3af',
+                            fontSize: 13,
+                            cursor: 'pointer',
+                            border: '1px dashed #d1d5db',
+                            borderRadius: 6,
+                          }}
+                          onClick={() => {
+                            setItems(items.map(i => i.id === item.id ? { ...i, showQuantity: true } : i));
+                          }}
+                          title="Noklikšķiniet, lai pievienotu daudzumu"
+                        >
+                          1 ×
+                        </div>
+                      )}
+                      {item.type === 'custom' && item.showQuantity && (
+                        <div 
+                          style={{ 
+                            fontSize: 10, 
+                            color: '#9ca3af', 
+                            textAlign: 'center', 
+                            cursor: 'pointer',
+                            position: 'absolute',
+                            top: '100%',
+                            left: 0,
+                            right: 0,
+                            marginTop: 2,
+                          }}
+                          onClick={() => {
+                            setItems(items.map(i => i.id === item.id ? { ...i, showQuantity: false, quantity: 1, total: calculateItemTotal(1, i.price) } : i));
+                          }}
+                        >
+                          paslēpt
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Price */}
+                    <div>
+                      <InputNumber
+                        min={0}
+                        step={0.01}
+                        value={item.price}
+                        onChange={(value) => handleItemChange(item.id, 'price', value || 0)}
+                        style={{ width: '100%' }}
+                        prefix="€"
+                      />
+                    </div>
+
+                    {/* Total */}
+                    <div style={{ textAlign: 'right', fontSize: 15, fontWeight: 600, color: '#111827' }}>
+                      €{parseFloat(item.total).toFixed(2)}
+                    </div>
+
+                    {/* Delete */}
+                    <div style={{ textAlign: 'center' }}>
+                      <Button
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => removeItem(item.id)}
+                        disabled={items.length === 1}
+                        size="small"
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <Button
-                type="dashed"
-                icon={<PlusOutlined />}
-                onClick={addItem}
-                style={{ marginTop: 16, width: '100%' }}
-              >
-                Pievienot produktu
-              </Button>
+              {/* Add Buttons */}
+              <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+                <Button
+                  type="dashed"
+                  icon={<PlusOutlined />}
+                  onClick={() => addItem('product')}
+                  style={{ flex: 1 }}
+                >
+                  Pievienot produktu
+                </Button>
+                <Button
+                  type="dashed"
+                  icon={<PlusOutlined />}
+                  onClick={() => addItem('custom')}
+                  style={{ 
+                    flex: 1,
+                    background: 'rgba(217, 119, 6, 0.05)',
+                    borderColor: '#d97706',
+                    color: '#b45309',
+                  }}
+                >
+                  Pievienot citu
+                </Button>
+              </div>
             </div>
 
             {/* Totals */}
@@ -1151,8 +1473,10 @@ const CreateInvoice = ({ mode = 'create' }) => {
                   <span style={{ fontWeight: 500, color: '#111827' }}>€{calculateSubtotal().toFixed(2)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', fontSize: 16 }}>
-                  <span style={{ color: '#6b7280' }}>PVN (0%)</span>
-                  <span style={{ fontWeight: 500, color: '#111827' }}>€0.00</span>
+                  <span style={{ color: '#6b7280' }}>
+                    PVN ({vatEnabled ? parseFloat(vatRate.toFixed(2)) : 0}%)
+                  </span>
+                  <span style={{ fontWeight: 500, color: '#111827' }}>€{calculateTaxAmount().toFixed(2)}</span>
                 </div>
                 <Divider style={{ margin: '12px 0' }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0' }}>
@@ -1179,16 +1503,6 @@ const CreateInvoice = ({ mode = 'create' }) => {
                   />
                 </Form.Item>
               </div>
-
-              {/* Important Notice */}
-              <Alert
-                message="Svarīgi: Automātiskie atgādinājuma e-pasti"
-                description="Automātiskie atgādinājuma e-pasti tiks nosūtīti klientiem tikai tad, ja rēķins ir nosūtīts klientam caur e-pastu vai atzīmēts kā 'nosūtīts klientam'. Ja rēķins nav nosūtīts, automātiskie atgādinājumi nedarbosies."
-                type="info"
-                showIcon
-                style={{ marginBottom: 24, fontSize: '13px' }}
-                icon={<InfoCircleOutlined />}
-              />
 
               {/* Action Buttons */}
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
@@ -1246,6 +1560,71 @@ const CreateInvoice = ({ mode = 'create' }) => {
           </div>
           <div style={{ fontSize: 13, color: '#6b7280' }}>
             Tiks saglabāti klienta dati (vārds, e-pasts, telefons, adrese) un piezīmes. Produkti netiks saglabāti.
+          </div>
+        </div>
+      </Modal>
+
+      {/* Blacklist Warning Modal */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <WarningOutlined style={{ color: '#F59E0B', fontSize: 22 }} />
+            <span style={{ color: '#F59E0B', fontWeight: 600 }}>Klients ir melnajā sarakstā!</span>
+          </div>
+        }
+        open={blacklistWarningVisible}
+        onOk={handleConfirmedSave}
+        onCancel={handleCancelBlacklistWarning}
+        okText="Turpināt tik un tā"
+        cancelText="Atcelt"
+        okButtonProps={{ 
+          danger: true,
+          style: { fontWeight: 600 }
+        }}
+        cancelButtonProps={{
+          style: { fontWeight: 600 }
+        }}
+        width={500}
+      >
+        <div style={{ padding: '16px 0' }}>
+          <div style={{ 
+            background: '#fef2f2', 
+            border: '1px solid #fecaca', 
+            borderRadius: 8, 
+            padding: 16,
+            marginBottom: 16
+          }}>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>Klienta vārds:</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>
+                {blacklistMatch?.customer_name || '-'}
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>E-pasts:</div>
+              <div style={{ fontSize: 16, fontWeight: 500, color: '#111827' }}>
+                {blacklistMatch?.customer_email || '-'}
+              </div>
+            </div>
+            {blacklistMatch?.overdue_count > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>Nokavēti rēķini:</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: '#ef4444' }}>
+                  {blacklistMatch.overdue_count}
+                </div>
+              </div>
+            )}
+            {blacklistMatch?.reason && (
+              <div>
+                <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>Iemesls:</div>
+                <div style={{ fontSize: 14, color: '#4b5563', fontStyle: 'italic' }}>
+                  "{blacklistMatch.reason}"
+                </div>
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 14, color: '#6b7280', lineHeight: 1.6 }}>
+            Šis klients ir pievienots melnajam sarakstam. Vai tiešām vēlaties izveidot rēķinu šim klientam?
           </div>
         </div>
       </Modal>

@@ -108,7 +108,7 @@ const Analytics = () => {
           topProducts,
         });
       } catch (error) {
-        console.error('Error fetching analytics data:', error);
+        // Error fetching analytics data
       } finally {
         setLoading(false);
       }

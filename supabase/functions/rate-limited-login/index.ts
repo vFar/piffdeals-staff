@@ -75,7 +75,6 @@ serve(async (req) => {
     });
 
     if (blockCheckError) {
-      console.error('Error checking IP block status:', blockCheckError);
       // Continue with login attempt if we can't check
     } else if (isBlocked) {
       // Get blocked until time
@@ -141,7 +140,6 @@ serve(async (req) => {
           check_email: email.toLowerCase(),
         });
       } catch (recordError) {
-        console.error('Error recording failed login:', recordError);
         // Continue even if recording fails
       }
 
@@ -164,7 +162,6 @@ serve(async (req) => {
         check_ip: clientIP,
       });
     } catch (clearError) {
-      console.error('Error clearing login attempts:', clearError);
       // Non-critical error, continue
     }
 
@@ -186,7 +183,6 @@ serve(async (req) => {
         p_user_agent: userAgent,
       });
     } catch (logError) {
-      console.error('Error logging login activity:', logError);
       // Non-critical error, continue
     }
 
@@ -203,7 +199,6 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Login function error:', error);
     return new Response(
       JSON.stringify({
         error: error.message || 'Internal server error',

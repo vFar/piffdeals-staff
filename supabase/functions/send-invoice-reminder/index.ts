@@ -1,5 +1,5 @@
 // Send Invoice Reminder Email Edge Function
-// Sends reminder email to customers 3 days after invoice issue_date
+// Sends reminder email to customers 2 days after invoice issue_date
 // Only sends reminders for invoices that were actually sent to customers (sent_at IS NOT NULL)
 // Should be called daily via cron job
 
@@ -65,11 +65,11 @@ serve(async (req) => {
     const url = new URL(req.url);
     const testMode = url.searchParams.get('test') === 'true';
 
-    // Calculate 3 days ago from today
+    // Calculate 2 days ago from today
     const today = new Date();
-    const threeDaysAgo = new Date(today);
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-    const threeDaysAgoStr = threeDaysAgo.toISOString().split('T')[0];
+    const twoDaysAgo = new Date(today);
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0];
     const todayStr = today.toISOString().split('T')[0];
     
     // Find invoices that:
@@ -78,7 +78,7 @@ serve(async (req) => {
     // 3. Have a customer_email
     // 4. Have a public_token (needed for invoice link)
     // 5. Have sent_at NOT NULL (invoice was actually sent to customer via email)
-    // 6. Issue date is 3 days ago (or within test range in test mode)
+    // 6. Issue date is 2 days ago (or within test range in test mode)
     // 7. Haven't had a reminder email sent yet (last_reminder_email_sent is null)
     let query = supabase
       .from('invoices')
@@ -103,9 +103,9 @@ serve(async (req) => {
         .gte('issue_date', fiveDaysAgoStr) // issue_date >= 5 days ago
         .lte('issue_date', oneDayAgoStr); // issue_date <= 1 day ago (so 1-5 days ago)
     } else {
-      // Production mode: check for invoices with issue_date 3 or more days ago (>= 3 days)
-      // This ensures reminders are sent if 3+ days have passed since invoice was created
-      query = query.lte('issue_date', threeDaysAgoStr); // issue_date <= 3 days ago
+      // Production mode: check for invoices with issue_date 2 or more days ago (>= 2 days)
+      // This ensures reminders are sent if 2+ days have passed since invoice was created
+      query = query.lte('issue_date', twoDaysAgoStr); // issue_date <= 2 days ago
     }
 
     const { data: invoices, error: fetchError } = await query;
@@ -121,17 +121,17 @@ serve(async (req) => {
           reminders_sent: 0,
           message: testMode 
             ? `No invoices found with issue_date 1-5 days ago that were sent to customers`
-            : `No invoices found with issue_date <= ${threeDaysAgoStr} (3+ days ago) that were sent to customers`,
+            : `No invoices found with issue_date <= ${twoDaysAgoStr} (2+ days ago) that were sent to customers`,
           debug: testMode ? {
             test_mode: true,
             today: todayStr,
-            three_days_ago: threeDaysAgoStr,
+            two_days_ago: twoDaysAgoStr,
             checked_range: '1-5 days ago'
           } : {
             test_mode: false,
             today: todayStr,
-            three_days_ago: threeDaysAgoStr,
-            checked_condition: `issue_date <= ${threeDaysAgoStr}`
+            two_days_ago: twoDaysAgoStr,
+            checked_condition: `issue_date <= ${twoDaysAgoStr}`
           }
         }),
         {
@@ -486,7 +486,7 @@ www.piffdeals.lv
         debug: testMode ? {
           test_mode: true,
           today: todayStr,
-          three_days_ago: threeDaysAgoStr,
+          two_days_ago: twoDaysAgoStr,
           total_invoices_found: invoicesToRemind.length
         } : undefined
       }),

@@ -37,7 +37,6 @@ serve(async (req) => {
     const { error } = await supabaseAdmin.rpc('cleanup_expired_sessions');
 
     if (error) {
-      console.error('Error cleaning up expired sessions:', error);
       return new Response(
         JSON.stringify({
           success: false,
@@ -61,7 +60,6 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Cleanup function error:', error);
     return new Response(
       JSON.stringify({
         success: false,
@@ -74,6 +72,9 @@ serve(async (req) => {
     );
   }
 });
+
+
+
 
 
 

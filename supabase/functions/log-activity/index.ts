@@ -118,7 +118,6 @@ serve(async (req) => {
     });
 
     if (error) {
-      console.error('[LogActivity] RPC call failed:', error);
       
       // Try direct insert as fallback
       try {
@@ -128,6 +127,9 @@ serve(async (req) => {
           .select('username, email, role')
           .eq('id', user.id)
           .maybeSingle();
+
+        // Explicitly set created_at to current UTC timestamp to ensure consistency
+        const now = new Date().toISOString();
 
         const { data: insertData, error: insertError } = await supabaseAdmin
           .from('activity_logs')
@@ -144,12 +146,12 @@ serve(async (req) => {
             target_id: targetId,
             ip_address: ipAddress,
             user_agent: userAgent,
+            created_at: now, // Explicitly set timestamp
           })
           .select('id')
           .single();
 
         if (insertError) {
-          console.error('[LogActivity] Direct insert also failed:', insertError);
           return new Response(
             JSON.stringify({ success: false, error: 'Failed to log activity' }),
             {
@@ -167,7 +169,67 @@ serve(async (req) => {
           }
         );
       } catch (fallbackError) {
-        console.error('[LogActivity] Fallback insert exception:', fallbackError);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Failed to log activity' }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
+    // If RPC succeeded but returned no data, try direct insert
+    if (!data) {
+      try {
+        // Get user profile for logging
+        const { data: userProfile } = await supabaseAdmin
+          .from('user_profiles')
+          .select('username, email, role')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        // Explicitly set created_at to current UTC timestamp to ensure consistency
+        const now = new Date().toISOString();
+
+        const { data: insertData, error: insertError } = await supabaseAdmin
+          .from('activity_logs')
+          .insert({
+            user_id: user.id,
+            user_username: userProfile?.username || user.user_metadata?.username || 'Unknown',
+            user_email: userProfile?.email || user.email || 'unknown@example.com',
+            user_role: userProfile?.role || 'employee',
+            action_type: actionType,
+            action_category: actionCategory,
+            description: description,
+            details: details,
+            target_type: targetType,
+            target_id: targetId,
+            ip_address: ipAddress,
+            user_agent: userAgent,
+            created_at: now, // Explicitly set timestamp
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'Failed to log activity' }),
+            {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, logId: insertData.id }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      } catch (fallbackError) {
         return new Response(
           JSON.stringify({ success: false, error: 'Failed to log activity' }),
           {
@@ -186,7 +248,6 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('[LogActivity] Unexpected error:', error);
     return new Response(
       JSON.stringify({ success: false, error: error.message || 'An error occurred' }),
       {

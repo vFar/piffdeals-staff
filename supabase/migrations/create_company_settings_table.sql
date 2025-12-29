@@ -135,3 +135,6 @@ COMMENT ON FUNCTION get_vat_setting() IS 'Returns current VAT setting (enabled/d
 COMMENT ON FUNCTION update_vat_setting(BOOLEAN, NUMERIC) IS 'Updates VAT setting (super_admin only)';
 
 
+
+
+

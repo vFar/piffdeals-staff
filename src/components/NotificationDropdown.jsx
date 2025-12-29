@@ -110,7 +110,7 @@ const NotificationDropdown = () => {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: isMobile ? '16px' : '8px 0',
+          padding: isMobile ? '16px' : isInDropdown ? '12px 16px 8px 16px' : '16px',
           borderBottom: isInDropdown ? 'none' : '1px solid #e5e7eb',
           marginBottom: isInDropdown ? '0' : '8px',
           flexShrink: 0,
@@ -159,10 +159,11 @@ const NotificationDropdown = () => {
               Nav paziņojumu
             </Text>
           }
-          style={{ padding: isMobile ? '60px 20px' : '40px 20px' }}
+          style={{ padding: isMobile ? '60px 20px' : isInDropdown ? '40px 16px' : '40px 20px' }}
         />
       ) : (
         <List
+          style={isInDropdown ? { padding: '0 16px 16px 16px' } : {}}
           dataSource={notifications}
           renderItem={(notification) => (
             <List.Item

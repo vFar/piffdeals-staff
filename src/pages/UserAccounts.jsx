@@ -282,10 +282,10 @@ const UserAccounts = () => {
             userId
           );
           if (!logResult.success) {
-            console.error('Failed to log user creation:', logResult.error);
+            // Failed to log user creation
           }
         } catch (logError) {
-          console.error('Error logging user creation:', logError);
+          // Error logging user creation
         }
       }
 
@@ -294,8 +294,6 @@ const UserAccounts = () => {
       form.resetFields();
       fetchUsers();
     } catch (error) {
-      console.error('Error creating user:', error);
-      
       // Show error message - check if it's a duplicate email error
       const errorMessage = error.message || String(error) || 'Kļūda izveidojot lietotāju';
       
@@ -399,10 +397,10 @@ const UserAccounts = () => {
               deletedUser.id
             );
             if (!logResult.success) {
-              console.error('Failed to log user deletion:', logResult.error);
+              // Failed to log user deletion
             }
           } catch (logError) {
-            console.error('Error logging user deletion:', logError);
+            // Error logging user deletion
           }
         }
 
@@ -419,7 +417,6 @@ const UserAccounts = () => {
         throw new Error(result.error || 'Kļūda dzēšot lietotājus');
       }
     } catch (error) {
-      console.error('Error deleting users:', error);
       message.error(error.message || 'Kļūda dzēšot lietotājus');
     } finally {
       setBulkActionLoading(false);
@@ -466,10 +463,9 @@ const UserAccounts = () => {
               user.id
             );
             if (!result.success) {
-              console.warn('Failed to log role change:', result.error);
+              // Failed to log role change
             }
           } catch (logError) {
-            console.error('Error logging role change:', logError);
             // Don't throw - logging failure shouldn't block the operation
           }
         }
@@ -538,7 +534,6 @@ const UserAccounts = () => {
             try {
               await performBulkStatusUpdate(status);
             } catch (error) {
-              console.error('Bulk: Error in performBulkStatusUpdate from modal:', error);
               // Don't rethrow - let performBulkStatusUpdate handle the error display
             }
           },
@@ -567,19 +562,11 @@ const UserAccounts = () => {
         .select();
 
       if (error) {
-        console.error('Database error updating status:', error);
-        console.error('Error details:', {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code
-        });
         throw error;
       }
 
       // Check if any rows were actually updated
       if (!data || data.length === 0) {
-        console.warn('No rows updated. This might be an RLS policy issue.');
         message.error('Nav atjaunināti lietotāji. Pārbaudiet atļaujas vai izvēlētos lietotājus.');
         return;
       }
@@ -620,33 +607,19 @@ const UserAccounts = () => {
             );
             
             if (!result.success) {
-              console.error('Failed to log status change:', result.error);
-              console.error('Error details:', {
-                message: result.error?.message,
-                stack: result.error?.stack
-              });
+              // Failed to log status change
             }
           } catch (logError) {
-            console.error('Exception while logging status change:', logError);
-            console.error('Error details:', {
-              message: logError?.message,
-              stack: logError?.stack
-            });
             // Don't throw - logging failure shouldn't block the operation
           }
-          } else {
-            console.warn(`Skipping log for ${updatedUser.username}: status appears unchanged (${previousUser.status} -> ${status})`);
-          }
-        } else {
-          console.error(`Cannot log: previousUser not found for ${updatedUser.username} (ID: ${updatedUser.id})`);
         }
+      }
       }
 
       message.success(`${data.length} lietotāju statusi veiksmīgi mainīti`);
       setSelectedRowKeys([]);
       fetchUsers();
     } catch (error) {
-      console.error('Error in performBulkStatusUpdate:', error);
       const errorMessage = error.message || error.details || error.hint || 'Kļūda maiņot statusu';
       message.error(`Kļūda: ${errorMessage}`);
       throw error;
@@ -873,7 +846,6 @@ const UserAccounts = () => {
                 await performUserUpdate(values);
                 resolve();
               } catch (error) {
-                console.error('Edit modal: Error in performUserUpdate:', error);
                 resolve(); // Resolve anyway to allow form to complete
               }
             },
@@ -909,18 +881,10 @@ const UserAccounts = () => {
         .select();
 
       if (error) {
-        console.error('Database error updating user:', error);
-        console.error('Error details:', {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code
-        });
         throw error;
       }
 
       if (!data || data.length === 0) {
-        console.warn('No rows updated in performUserUpdate. This might be an RLS policy issue.');
         message.error('Nav atjaunināti lietotāja dati. Pārbaudiet atļaujas.');
         return;
       }
@@ -1005,18 +969,9 @@ const UserAccounts = () => {
           );
           
           if (!result.success) {
-            console.error('Failed to log user update:', result.error);
-            console.error('Error details:', {
-              message: result.error?.message,
-              stack: result.error?.stack
-            });
+            // Failed to log user update
           }
         } catch (logError) {
-          console.error('Exception while logging user update:', logError);
-          console.error('Error details:', {
-            message: logError?.message,
-            stack: logError?.stack
-          });
           // Don't throw - logging failure shouldn't block the operation
         }
       }
@@ -1027,7 +982,6 @@ const UserAccounts = () => {
       setEditingUser(null);
       fetchUsers();
     } catch (error) {
-      console.error('Error in performUserUpdate:', error);
       const errorMessage = error.message || error.details || error.hint || 'Kļūda atjauninot lietotāju';
       message.error(`Kļūda: ${errorMessage}`);
       throw error;

@@ -1,30 +1,44 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Spin } from 'antd';
 import ProtectedRoute from './components/ProtectedRoute';
 import RoleRoute from './components/RoleRoute';
 import SessionTimeoutNotifier from './components/SessionTimeoutNotifier';
-import Login from './pages/Login';
-import ResetPassword from './pages/ResetPassword';
-import Dashboard from './pages/Dashboard';
-import UserAccounts from './pages/UserAccounts';
-import Profile from './pages/Profile';
-import Invoices from './pages/Invoices';
-import CreateInvoice from './pages/CreateInvoice';
-import ViewInvoice from './pages/ViewInvoice';
-import PublicInvoice from './pages/PublicInvoice';
-import InvoiceTemplates from './pages/InvoiceTemplates';
-import ActivityLogs from './pages/ActivityLogs';
-import CompanySettings from './pages/CompanySettings';
-import SalesCharts from './pages/SalesCharts';
-import Analytics from './pages/Analytics';
-import Statistics from './pages/Statistics';
-import SalesAnalytics from './pages/SalesAnalytics';
-import Blacklist from './pages/Blacklist';
+import { GlobalBarcodeScannerProvider } from './contexts/GlobalBarcodeScannerContext';
+
+// Lazy load pages for code splitting
+const Login = lazy(() => import('./pages/Login'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const UserAccounts = lazy(() => import('./pages/UserAccounts'));
+const Profile = lazy(() => import('./pages/Profile'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const CreateInvoice = lazy(() => import('./pages/CreateInvoice'));
+const ViewInvoice = lazy(() => import('./pages/ViewInvoice'));
+const PublicInvoice = lazy(() => import('./pages/PublicInvoice'));
+const InvoiceTemplates = lazy(() => import('./pages/InvoiceTemplates'));
+const ActivityLogs = lazy(() => import('./pages/ActivityLogs'));
+const CompanySettings = lazy(() => import('./pages/CompanySettings'));
+const SalesCharts = lazy(() => import('./pages/SalesCharts'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Statistics = lazy(() => import('./pages/Statistics'));
+const SalesAnalytics = lazy(() => import('./pages/SalesAnalytics'));
+const Blacklist = lazy(() => import('./pages/Blacklist'));
+
+// Loading fallback component
+const PageLoader = () => (
+  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+    <Spin size="large" />
+  </div>
+);
 
 function App() {
   return (
     <>
-      <SessionTimeoutNotifier />
-      <Routes>
+      <GlobalBarcodeScannerProvider>
+        <SessionTimeoutNotifier />
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
       {/* Public Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/reset-password" element={<ResetPassword />} />
@@ -187,7 +201,9 @@ function App() {
 
       {/* Catch all - redirect to dashboard */}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+          </Routes>
+        </Suspense>
+      </GlobalBarcodeScannerProvider>
     </>
   );
 }

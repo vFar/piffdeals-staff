@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import { Card, Row, Col, Typography, Spin, Table } from 'antd';
 import { UserOutlined, ShoppingOutlined, ClockCircleOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import { LineChart, BarChart, PieChart } from '@mui/x-charts';
@@ -23,6 +23,46 @@ const EuroIcon = () => (
     €
   </div>
 );
+
+// Stat Card Component - Memoized to prevent unnecessary re-renders (defined outside to avoid hooks issues)
+const StatCard = memo(({ icon, title, value, change, iconBg = '#EBF3FF', iconColor = '#0068FF', formatValue }) => {
+  const displayValue = useMemo(() => formatValue ? formatValue(value) : value.toLocaleString(), [formatValue, value]);
+  
+  return (
+    <Card
+      className="stat-card"
+      style={{
+        borderRadius: '16px',
+        border: '1px solid #e2e8f0',
+        background: '#ffffff',
+        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+        height: '100%',
+      }}
+    >
+      <div className="stat-card-content">
+        <div className="stat-card-info">
+          <div className="stat-card-header">
+            <div className="stat-card-icon" style={{ background: iconBg, color: iconColor }}>
+              {icon}
+            </div>
+            <div className="stat-card-text">
+              <h3 className="stat-card-value">{displayValue}</h3>
+              <div className="stat-card-meta">
+                <Text className="stat-card-title">{title}</Text>
+                <span className="stat-card-change" style={{
+                  background: change.isPositive ? '#dcfce7' : '#fee2e2',
+                  color: change.isPositive ? '#166534' : '#991b1b',
+                }}>
+                  {change.text}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+});
 
 const Dashboard = () => {
   const { userProfile: authProfile, currentUser, loading: authLoading } = useAuth();
@@ -277,77 +317,29 @@ const Dashboard = () => {
     });
   }, [invoices, getMonthRanges]);
 
-  // Recalculate when invoices change
-  useEffect(() => {
-    if (invoices && invoices.length > 0) {
-      calculateDashboardData();
-    }
-  }, [invoices, calculateDashboardData]);
-
-  const formatPercentage = (value) => {
+  // Format percentage helper function - defined before use
+  const formatPercentage = useCallback((value) => {
     const isPositive = value >= 0;
     const color = isPositive ? '#12b76a' : '#ef4444';
     const sign = isPositive ? '+' : '';
     return { text: `${sign}${value.toFixed(1)}%`, color, isPositive };
-  };
+  }, []);
 
-  if (authLoading || roleLoading || invoicesLoading) {
-    return (
-      <DashboardLayout>
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
-          <Spin size="large" />
-        </div>
-      </DashboardLayout>
-    );
-  }
+  // Recalculate when invoices change - only if invoices actually changed
+  useEffect(() => {
+    if (invoices && invoices.length >= 0) {
+      calculateDashboardData();
+    }
+  }, [invoices, calculateDashboardData]);
+  
+  // Memoize formatted percentages to prevent recalculation
+  const ordersPercent = useMemo(() => formatPercentage(dashboardData.totalOrdersChange), [dashboardData.totalOrdersChange, formatPercentage]);
+  const unpaidPercent = useMemo(() => formatPercentage(dashboardData.unpaidInvoicesChange), [dashboardData.unpaidInvoicesChange, formatPercentage]);
+  const revenuePercent = useMemo(() => formatPercentage(dashboardData.totalRevenueChange), [dashboardData.totalRevenueChange, formatPercentage]);
+  const customersPercent = useMemo(() => formatPercentage(dashboardData.totalCustomersChange), [dashboardData.totalCustomersChange, formatPercentage]);
 
-  const ordersPercent = formatPercentage(dashboardData.totalOrdersChange);
-  const unpaidPercent = formatPercentage(dashboardData.unpaidInvoicesChange);
-  const revenuePercent = formatPercentage(dashboardData.totalRevenueChange);
-  const customersPercent = formatPercentage(dashboardData.totalCustomersChange);
-
-  // Stat Card Component
-  const StatCard = ({ icon, title, value, change, iconBg = '#EBF3FF', iconColor = '#0068FF', formatValue }) => {
-    const displayValue = formatValue ? formatValue(value) : value.toLocaleString();
-    
-    return (
-      <Card
-        className="stat-card"
-        style={{
-          borderRadius: '16px',
-          border: '1px solid #e2e8f0',
-          background: '#ffffff',
-          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-          height: '100%',
-        }}
-      >
-        <div className="stat-card-content">
-          <div className="stat-card-info">
-            <div className="stat-card-header">
-              <div className="stat-card-icon" style={{ background: iconBg, color: iconColor }}>
-                {icon}
-              </div>
-              <div className="stat-card-text">
-                <h3 className="stat-card-value">{displayValue}</h3>
-                <div className="stat-card-meta">
-                  <Text className="stat-card-title">{title}</Text>
-                  <span className="stat-card-change" style={{
-                    background: change.isPositive ? '#dcfce7' : '#fee2e2',
-                    color: change.isPositive ? '#166534' : '#991b1b',
-                  }}>
-                    {change.text}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Card>
-    );
-  };
-
-  // Recent Invoices Table Columns
-  const invoiceColumns = [
+  // Recent Invoices Table Columns - Memoized to prevent recreation
+  const invoiceColumns = useMemo(() => [
     {
       title: 'Rēķina numurs',
       dataIndex: 'invoice_number',
@@ -406,7 +398,18 @@ const Dashboard = () => {
         );
       },
     },
-  ];
+  ], []);
+
+  // Early return for loading state - AFTER all hooks are called
+  if (authLoading || roleLoading || invoicesLoading) {
+    return (
+      <DashboardLayout>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+          <Spin size="large" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>

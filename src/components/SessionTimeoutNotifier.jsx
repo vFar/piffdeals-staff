@@ -116,7 +116,6 @@ const SessionTimeoutNotifier = () => {
       await signOut();
     } catch (error) {
       // Even if signOut fails, continue to login page
-      console.error('Error signing out during timeout:', error);
     }
     
     // Reset timeout flag and close modal

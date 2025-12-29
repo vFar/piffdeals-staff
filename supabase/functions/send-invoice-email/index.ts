@@ -235,8 +235,8 @@ serve(async (req) => {
     
     // Warn if using localhost (Edge Functions can't access localhost)
     if (publicSiteUrl.includes('localhost') || publicSiteUrl.includes('127.0.0.1')) {
-      console.warn('WARNING: PUBLIC_SITE_URL appears to be localhost. Edge Functions cannot access localhost URLs. Images may not load.');
-      console.warn('Consider setting PUBLIC_SITE_URL to https://staff.piffdeals.lv in Edge Function secrets');
+      // WARNING: PUBLIC_SITE_URL appears to be localhost. Edge Functions cannot access localhost URLs. Images may not load.
+      // Consider setting PUBLIC_SITE_URL to https://staff.piffdeals.lv in Edge Function secrets
     }
     
     // Ensure HTTPS is used for production (unless explicitly localhost)
@@ -248,9 +248,6 @@ serve(async (req) => {
     const logoImageUrl = `${finalSiteUrl}/images/S-3.png`;
     const textLogoAccentUrl = `${finalSiteUrl}/images/piffdeals_text_accent.png`;
     const textLogoPrimaryUrl = `${finalSiteUrl}/images/piffdeals_text_primary.png`;
-    
-    console.log('Using site URL:', finalSiteUrl);
-    console.log('Image URLs to fetch:', { logoImageUrl, textLogoAccentUrl, textLogoPrimaryUrl });
     
     // Fetch images and convert to base64 for embedding in email
     // This ensures images display in all email clients without requiring external access
@@ -271,7 +268,6 @@ serve(async (req) => {
     // Helper function to fetch and convert PNG to base64
     const fetchPngAsBase64 = async (url: string, imageName: string): Promise<string> => {
       try {
-        console.log(`Fetching ${imageName} from: ${url}`);
         const response = await fetch(url, {
           method: 'GET',
           headers: {
@@ -279,26 +275,21 @@ serve(async (req) => {
           },
         });
         
-        console.log(`${imageName} response status: ${response.status} ${response.statusText}`);
-        
         if (response.ok) {
           const buffer = await response.arrayBuffer();
           const base64String = arrayBufferToBase64(buffer);
           const dataUri = `data:image/png;base64,${base64String}`;
-          console.log(`${imageName} successfully converted to base64 (${dataUri.length} chars)`);
           return dataUri;
         } else {
-          const errorText = await response.text().catch(() => 'Unable to read error response');
-          console.error(`Failed to fetch ${imageName}: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`);
+          // Failed to fetch image
         }
       } catch (error) {
-        console.error(`Error fetching ${imageName} from ${url}:`, error);
+        // Error fetching image
       }
       return '';
     };
     
     // Fetch all images in parallel
-    console.log('Starting image fetch for:', { logoImageUrl, textLogoAccentUrl, textLogoPrimaryUrl });
     const [logoBase64Result, textLogoAccentBase64Result, textLogoPrimaryBase64Result] = await Promise.all([
       fetchPngAsBase64(logoImageUrl, 'S-3.png'),
       fetchPngAsBase64(textLogoAccentUrl, 'piffdeals_text_accent.png'),
@@ -308,12 +299,6 @@ serve(async (req) => {
     logoBase64 = logoBase64Result;
     textLogoAccentBase64 = textLogoAccentBase64Result;
     textLogoPrimaryBase64 = textLogoPrimaryBase64Result;
-    
-    console.log('Image fetch results:', {
-      logoLoaded: !!logoBase64,
-      accentLoaded: !!textLogoAccentBase64,
-      primaryLoaded: !!textLogoPrimaryBase64,
-    });
     
     // Fallback to URLs if base64 conversion failed
     // Ensure we always have a valid URL (never empty string)
@@ -334,28 +319,8 @@ serve(async (req) => {
     if (!finalLogoUrl || finalLogoUrl.trim() === '' || 
         !finalTextLogoAccentUrl || finalTextLogoAccentUrl.trim() === '' ||
         !finalTextLogoPrimaryUrl || finalTextLogoPrimaryUrl.trim() === '') {
-      console.error('CRITICAL: One or more image URLs are empty after fallback!', {
-        finalLogoUrl: finalLogoUrl || 'EMPTY',
-        finalTextLogoAccentUrl: finalTextLogoAccentUrl || 'EMPTY',
-        finalTextLogoPrimaryUrl: finalTextLogoPrimaryUrl || 'EMPTY',
-        logoImageUrl,
-        textLogoAccentUrl,
-        textLogoPrimaryUrl,
-      });
+      // CRITICAL: One or more image URLs are empty after fallback!
     }
-    
-    // Log detailed info about final URLs
-    console.log('Final image URLs:', {
-      logo: finalLogoUrl.substring(0, 100) + (finalLogoUrl.length > 100 ? '...' : ''),
-      logoIsBase64: finalLogoUrl.startsWith('data:image'),
-      logoLength: finalLogoUrl.length,
-      accent: finalTextLogoAccentUrl.substring(0, 100) + (finalTextLogoAccentUrl.length > 100 ? '...' : ''),
-      accentIsBase64: finalTextLogoAccentUrl.startsWith('data:image'),
-      accentLength: finalTextLogoAccentUrl.length,
-      primary: finalTextLogoPrimaryUrl.substring(0, 100) + (finalTextLogoPrimaryUrl.length > 100 ? '...' : ''),
-      primaryIsBase64: finalTextLogoPrimaryUrl.startsWith('data:image'),
-      primaryLength: finalTextLogoPrimaryUrl.length,
-    });
     
     // Force use of HTTP URLs instead of data URIs (some email clients strip data URIs)
     // Data URIs can be blocked by email security filters
@@ -371,13 +336,6 @@ serve(async (req) => {
     if (!finalLogoUrlForEmail || finalLogoUrlForEmail.trim() === '' ||
         !finalTextLogoAccentUrlForEmail || finalTextLogoAccentUrlForEmail.trim() === '' ||
         !finalTextLogoPrimaryUrlForEmail || finalTextLogoPrimaryUrlForEmail.trim() === '') {
-      console.error('CRITICAL ERROR: Image URLs are empty!', {
-        logoImageUrl,
-        textLogoAccentUrl,
-        textLogoPrimaryUrl,
-        finalSiteUrl,
-        publicSiteUrl,
-      });
       throw new Error(`Image URLs are invalid: logo=${!!finalLogoUrlForEmail}, accent=${!!finalTextLogoAccentUrlForEmail}, primary=${!!finalTextLogoPrimaryUrlForEmail}`);
     }
     
@@ -392,21 +350,14 @@ serve(async (req) => {
       throw new Error(`Invalid primary URL format: ${finalTextLogoPrimaryUrlForEmail}`);
     }
     
-    console.log('Using image URLs for email:', {
-      logo: finalLogoUrlForEmail,
-      accent: finalTextLogoAccentUrlForEmail,
-      primary: finalTextLogoPrimaryUrlForEmail,
-    });
-    
     // Quick test: Try to fetch the accent image to verify it's accessible
     try {
       const accentTestResponse = await fetch(finalTextLogoAccentUrlForEmail, { method: 'HEAD' });
-      console.log(`Accent image accessibility test: ${accentTestResponse.status} ${accentTestResponse.statusText}`);
       if (!accentTestResponse.ok) {
-        console.warn(`WARNING: Accent image may not be accessible at ${finalTextLogoAccentUrlForEmail}`);
+        // WARNING: Accent image may not be accessible
       }
     } catch (error) {
-      console.warn(`WARNING: Could not verify accent image accessibility:`, error);
+      // WARNING: Could not verify accent image accessibility
     }
 
     // Build CTA buttons HTML based on whether payment link exists
@@ -642,20 +593,6 @@ serve(async (req) => {
 </body>
 </html>
     `;
-
-    // Debug: Extract and log actual img tags from the HTML to verify they're correct
-    const logoTagMatch = emailHtml.match(/<img[^>]*src="([^"]*)"[^>]*alt="[^"]*Logo"[^>]*>/);
-    const accentTagMatch = emailHtml.match(/<img[^>]*src="([^"]*)"[^>]*alt="${COMPANY_NAME}"[^>]*width="auto"[^>]*height="24"[^>]*>/);
-    const primaryTagMatch = emailHtml.match(/<img[^>]*src="([^"]*)"[^>]*alt="${COMPANY_NAME}"[^>]*opacity: 0.7[^>]*>/);
-    
-    console.log('=== DEBUG: Actual img tags found in generated HTML ===');
-    console.log('Logo tag:', logoTagMatch ? logoTagMatch[0].substring(0, 250) : 'NOT FOUND');
-    console.log('Logo src value:', logoTagMatch ? logoTagMatch[1] : 'NOT FOUND');
-    console.log('Accent tag:', accentTagMatch ? accentTagMatch[0].substring(0, 250) : 'NOT FOUND');
-    console.log('Accent src value:', accentTagMatch ? accentTagMatch[1] : 'NOT FOUND');
-    console.log('Primary tag:', primaryTagMatch ? primaryTagMatch[0].substring(0, 250) : 'NOT FOUND');
-    console.log('Primary src value:', primaryTagMatch ? primaryTagMatch[1] : 'NOT FOUND');
-    console.log('=== END DEBUG ===');
 
     // Plain text version for better deliverability
     const emailText = `Sveiki, ${customerName}!

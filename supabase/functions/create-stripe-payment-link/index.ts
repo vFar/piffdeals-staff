@@ -154,9 +154,43 @@ serve(async (req) => {
       invoice.public_token = updatedInvoice.public_token
     }
     
-    // Get frontend URL from environment variable
-    // Default to staff.piffdeals.lv (where the public invoice page is hosted)
-    const frontendUrl = Deno.env.get('FRONTEND_URL') || 'https://staff.piffdeals.lv'
+    // Get frontend URL - dynamically detect from request origin
+    // This ensures redirects go to the same domain where the request originated
+    const productionUrl = 'https://staff.piffdeals.lv';
+    
+    // Try to get the origin from the request headers (most reliable)
+    // This will be the domain where the user is currently accessing the site
+    const origin = req.headers.get('origin') || req.headers.get('referer');
+    let frontendUrl = productionUrl; // Default fallback to production
+    
+    if (origin) {
+      try {
+        const originUrl = new URL(origin);
+        // Use the origin URL if it's a valid URL (supports both localhost for dev and production)
+        // This way:
+        // - If you're on localhost:5173 → redirects will go to localhost:5173
+        // - If you're on staff.piffdeals.lv → redirects will go to staff.piffdeals.lv
+        frontendUrl = `${originUrl.protocol}//${originUrl.hostname}${originUrl.port ? `:${originUrl.port}` : ''}`;
+      } catch (e) {
+        // Invalid URL, use default
+      }
+    }
+    
+    // If we still have default and no valid origin, check environment variable
+    if (frontendUrl === productionUrl) {
+      const envUrl = Deno.env.get('FRONTEND_URL');
+      if (envUrl) {
+        try {
+          const envUrlObj = new URL(envUrl);
+          frontendUrl = `${envUrlObj.protocol}//${envUrlObj.hostname}${envUrlObj.port ? `:${envUrlObj.port}` : ''}`;
+        } catch (e) {
+          // Invalid env URL, keep production default
+        }
+      }
+    }
+    
+    // Ensure URL doesn't end with trailing slash
+    frontendUrl = frontendUrl.replace(/\/$/, '');
     
     // Create Stripe Checkout Session (instead of Payment Link for better customization)
     // Checkout Sessions support: Latvian language, custom branding, European payment methods
@@ -253,7 +287,8 @@ serve(async (req) => {
       
       // Success and cancel URLs - Redirect back to public invoice page
       // Format: https://staff.piffdeals.lv/i/{public_token}?payment=success
-      // Note: Set FRONTEND_URL environment variable in Supabase Dashboard for production
+      // The frontend URL is automatically detected from request headers or environment variable.
+      // Localhost URLs are never used to prevent redirect errors in production.
       success_url: `${frontendUrl}/i/${invoice.public_token}?payment=success`,
       cancel_url: `${frontendUrl}/i/${invoice.public_token}?payment=cancelled`,
       

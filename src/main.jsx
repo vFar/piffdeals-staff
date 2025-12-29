@@ -10,8 +10,8 @@ import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 import App from './App.jsx'
 
-// Ant Design theme configuration
-const theme = {
+// Ant Design theme configuration - moved outside component to prevent recreation
+const themeConfig = {
   token: {
     colorPrimary: '#0068FF',
     borderRadius: 8,
@@ -43,7 +43,7 @@ createRoot(document.getElementById('root')).render(
         <AuthProvider>
           <InvoiceDataProvider>
             <NotificationProvider>
-              <ConfigProvider theme={theme} locale={lvLV}>
+              <ConfigProvider theme={themeConfig} locale={lvLV}>
                 <AntdApp>
                   <App />
                 </AntdApp>

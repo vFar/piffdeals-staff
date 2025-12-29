@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { notification } from 'antd';
 import { useAuth } from './AuthContext';
 import { useUserRole } from '../hooks/useUserRole';
@@ -66,7 +66,7 @@ const saveNotifications = (userId, notifications) => {
   try {
     localStorage.setItem(getStorageKey(userId), JSON.stringify(notifications));
   } catch (error) {
-    console.error('Failed to save notifications:', error);
+    // Failed to save notifications
   }
 };
 
@@ -83,7 +83,7 @@ const saveDeletedKeys = (userId, deletedKeys) => {
   try {
     localStorage.setItem(getDeletedKeysKey(userId), JSON.stringify(Array.from(deletedKeys)));
   } catch (error) {
-    console.error('Failed to save deleted keys:', error);
+    // Failed to save deleted keys
   }
 };
 
@@ -574,7 +574,7 @@ export const NotificationProvider = ({ children }) => {
     }
   }, [userProfile, checkDailyDigest]);
 
-  const value = {
+  const value = useMemo(() => ({
     notifications,
     unreadCount,
     addNotification,
@@ -586,7 +586,7 @@ export const NotificationProvider = ({ children }) => {
     notifyEmailSendFailed,
     notifyStockUpdateFailed,
     checkDailyDigest,
-  };
+  }), [notifications, unreadCount, addNotification, markAsRead, markAllAsRead, clearAll, removeNotification, notifyInvoicePaid, notifyEmailSendFailed, notifyStockUpdateFailed, checkDailyDigest]);
 
   return (
     <NotificationContext.Provider value={value}>

@@ -55,9 +55,11 @@ const Breadcrumbs = () => {
       analytics: 'Vispārējā analītika',
       'user-accounts': 'Lietotāju konti',
       'activity-logs': 'Darbību žurnāls',
+      'company-settings': 'Uzņēmuma iestatījumi',
       profile: 'Iestatījumi',
       create: 'Izveidot',
       edit: 'Rediģēt',
+      blacklist: 'Melnais saraksts',
     };
 
     // Build breadcrumb items based on path segments

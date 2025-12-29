@@ -64,7 +64,6 @@ const Profile = () => {
         );
       } catch (logError) {
         // Log error but don't block password change
-        console.error('Error logging password change:', logError);
       }
 
       messageApi.success('Parole veiksmīgi nomainīta');
@@ -129,7 +128,6 @@ const Profile = () => {
         );
       } catch (logError) {
         // Log error but don't block deletion - logging should not prevent account deletion
-        console.error('Error logging account deletion:', logError);
       }
 
       // Call the delete-user edge function to delete the auth user
@@ -175,7 +173,6 @@ const Profile = () => {
       // Navigate to login
       navigate('/login');
     } catch (error) {
-      console.error('Error deleting account:', error);
       messageApi.error(error?.message || 'Kļūda dzēšot kontu');
       setDeletingAccount(false);
     }
@@ -380,7 +377,7 @@ const Profile = () => {
       <Modal
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ExclamationCircleOutlined style={{ fontSize: '20px', color: '#dc2626' }} />
+            <ExclamationCircleOutlined style={{ fontSize: '20px', color: '#F59E0B' }} />
             <span style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>
               Apstipriniet konta dzēšanu
             </span>

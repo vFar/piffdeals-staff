@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { useUserRole } from '../hooks/useUserRole';
@@ -22,8 +22,8 @@ export const InvoiceDataProvider = ({ children }) => {
   const [lastFetch, setLastFetch] = useState(null);
   const [error, setError] = useState(null);
   
-  // Cache duration: 30 seconds (stale-while-revalidate pattern)
-  const CACHE_DURATION = 30000;
+  // Cache duration: 60 seconds (stale-while-revalidate pattern) - increased for better performance
+  const CACHE_DURATION = 60000;
   const isFetchingRef = { current: false };
 
   /**
@@ -88,7 +88,6 @@ export const InvoiceDataProvider = ({ children }) => {
       setInvoices(enrichedInvoices);
       setLastFetch(Date.now());
     } catch (err) {
-      console.error('Error fetching invoices:', err);
       setError(err.message || 'Failed to fetch invoices');
     } finally {
       setLoading(false);
@@ -145,7 +144,7 @@ export const InvoiceDataProvider = ({ children }) => {
     }
   }, [userProfile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const value = {
+  const value = useMemo(() => ({
     // Data
     invoices,
     loading,
@@ -162,7 +161,7 @@ export const InvoiceDataProvider = ({ children }) => {
     getUnpaidInvoices,
     getInvoiceById,
     getInvoiceByNumber,
-  };
+  }), [invoices, loading, error, lastFetch, fetchInvoices, refreshInvoices, getInvoicesByStatus, getPaidInvoices, getUnpaidInvoices, getInvoiceById, getInvoiceByNumber]);
 
   return (
     <InvoiceDataContext.Provider value={value}>
