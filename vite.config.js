@@ -10,7 +10,26 @@ export default defineConfig(({ mode }) => {
   const supabaseUrl = env.VITE_SUPABASE_URL || 'https://emqhyievrsyeinwrqqhw.supabase.co'
   
   return {
-    plugins: [react()],
+    plugins: [
+      react({
+        // Ensure React 19 compatibility
+        jsxRuntime: 'automatic',
+      }),
+    ],
+    // Ensure React is properly resolved (dedupe prevents multiple React instances)
+    resolve: {
+      dedupe: ['react', 'react-dom'],
+      alias: {
+        // Ensure React is always resolved to the same instance
+        'react': 'react',
+        'react-dom': 'react-dom',
+      },
+    },
+    // Define React version for Ant Design compatibility
+    define: {
+      'process.env': {},
+      '__REACT_VERSION__': JSON.stringify('19.2.0'),
+    },
     server: {
       proxy: {
         // Proxy Supabase API requests to avoid CORS issues in development
@@ -43,17 +62,20 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks: (id) => {
-            // React vendor chunk
-            if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router')) {
-              return 'react-vendor';
+            // Combine React and Ant Design to avoid version check issues
+            // Ant Design needs React to be available when it loads
+            if (
+              id.includes('node_modules/react') || 
+              id.includes('node_modules/react-dom') || 
+              id.includes('node_modules/react-router') ||
+              id.includes('node_modules/antd') || 
+              id.includes('node_modules/@ant-design')
+            ) {
+              return 'react-antd-vendor';
             }
             // Supabase vendor chunk
             if (id.includes('node_modules/@supabase')) {
               return 'supabase-vendor';
-            }
-            // Ant Design chunk (large library)
-            if (id.includes('node_modules/antd') || id.includes('node_modules/@ant-design')) {
-              return 'antd-vendor';
             }
             // MUI Charts chunk
             if (id.includes('node_modules/@mui')) {
@@ -68,6 +90,18 @@ export default defineConfig(({ mode }) => {
           chunkFileNames: 'assets/[name]-[hash].js',
           entryFileNames: 'assets/[name]-[hash].js',
           assetFileNames: 'assets/[name]-[hash].[ext]',
+        },
+      },
+      // Ensure proper module resolution for React 19
+      commonjsOptions: {
+        include: [/node_modules/],
+        transformMixedEsModules: true,
+      },
+      // Optimize dependencies
+      optimizeDeps: {
+        include: ['react', 'react-dom', 'antd'],
+        esbuildOptions: {
+          target: 'es2020',
         },
       },
       // Optimize chunk size warnings
