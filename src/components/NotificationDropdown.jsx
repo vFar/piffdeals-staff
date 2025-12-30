@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Badge, Dropdown, Button, List, Typography, Empty, Space, Divider, Drawer } from 'antd';
+import { Badge, Dropdown, Button, Typography, Empty, Space, Divider, Drawer, App } from 'antd';
 import {
   BellOutlined,
   CheckOutlined,
@@ -162,11 +162,9 @@ const NotificationDropdown = () => {
           style={{ padding: isMobile ? '60px 20px' : isInDropdown ? '40px 16px' : '40px 20px' }}
         />
       ) : (
-        <List
-          style={isInDropdown ? { padding: '0 16px 16px 16px' } : {}}
-          dataSource={notifications}
-          renderItem={(notification) => (
-            <List.Item
+        <div style={isInDropdown ? { padding: '0 16px 16px 16px' } : {}}>
+          {notifications.map((notification) => (
+            <div
               key={notification.id}
               style={{
                 padding: isMobile ? '16px' : '12px',
@@ -176,6 +174,8 @@ const NotificationDropdown = () => {
                 marginBottom: '4px',
                 borderRadius: '8px',
                 transition: 'all 0.2s',
+                display: 'flex',
+                gap: '12px',
               }}
               onClick={() => {
                 handleNotificationClick(notification);
@@ -196,93 +196,88 @@ const NotificationDropdown = () => {
                 }
               }}
             >
-              <List.Item.Meta
-                avatar={
-                  <div
+              <div
+                style={{
+                  width: isMobile ? '40px' : '32px',
+                  height: isMobile ? '40px' : '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: getPriorityColor(notification.priority),
+                  borderRadius: '6px',
+                  flexShrink: 0,
+                }}
+              >
+                {getPriorityIcon(notification.priority)}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                  <Text
+                    strong={!notification.read}
                     style={{
-                      width: isMobile ? '40px' : '32px',
-                      height: isMobile ? '40px' : '32px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: getPriorityColor(notification.priority),
-                      borderRadius: '6px',
+                      fontSize: isMobile ? '15px' : '13px',
+                      color: '#111827',
+                      flex: 1,
+                      marginRight: '8px',
                     }}
                   >
-                    {getPriorityIcon(notification.priority)}
-                  </div>
-                }
-                title={
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Text
-                      strong={!notification.read}
-                      style={{
-                        fontSize: isMobile ? '15px' : '13px',
-                        color: '#111827',
-                        flex: 1,
-                        marginRight: '8px',
-                      }}
-                    >
-                      {notification.title}
-                    </Text>
-                    <Space>
-                      {!notification.read && (
-                        <div
-                          style={{
-                            width: '8px',
-                            height: '8px',
-                            borderRadius: '50%',
-                            background: '#ef4444',
-                            flexShrink: 0,
-                          }}
-                        />
-                      )}
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<DeleteOutlined />}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeNotification(notification.id);
-                        }}
+                    {notification.title}
+                  </Text>
+                  <Space>
+                    {!notification.read && (
+                      <div
                         style={{
-                          padding: '0 4px',
-                          width: isMobile ? '28px' : '20px',
-                          height: isMobile ? '28px' : '20px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#ef4444',
+                          flexShrink: 0,
                         }}
                       />
-                    </Space>
-                  </div>
-                }
-                description={
-                  <div>
-                    <Text
-                      style={{
-                        fontSize: isMobile ? '14px' : '12px',
-                        color: '#6b7280',
-                        display: 'block',
-                        marginBottom: '4px',
+                    )}
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeNotification(notification.id);
                       }}
-                    >
-                      {notification.message || notification.description}
-                    </Text>
-                    <Text
                       style={{
-                        fontSize: isMobile ? '12px' : '11px',
-                        color: '#9ca3af',
+                        padding: '0 4px',
+                        width: isMobile ? '28px' : '20px',
+                        height: isMobile ? '28px' : '20px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
-                    >
-                      {formatTime(notification.timestamp)}
-                    </Text>
-                  </div>
-                }
-              />
-            </List.Item>
-          )}
-        />
+                    />
+                  </Space>
+                </div>
+                <div>
+                  <Text
+                    style={{
+                      fontSize: isMobile ? '14px' : '12px',
+                      color: '#6b7280',
+                      display: 'block',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    {notification.message || notification.description}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: isMobile ? '12px' : '11px',
+                      color: '#9ca3af',
+                    }}
+                  >
+                    {formatTime(notification.timestamp)}
+                  </Text>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -329,7 +324,7 @@ const NotificationDropdown = () => {
           placement="right"
           onClose={() => setDropdownOpen(false)}
           open={dropdownOpen}
-          width="100%"
+          size="100%"
           style={{ zIndex: 1002 }}
         >
           <NotificationContent />

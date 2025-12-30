@@ -138,3 +138,4 @@ COMMENT ON FUNCTION update_vat_setting(BOOLEAN, NUMERIC) IS 'Updates VAT setting
 
 
 
+

@@ -60,3 +60,4 @@ COMMENT ON COLUMN customer_blacklist.added_by IS 'User who added this customer t
 
 
 
+

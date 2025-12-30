@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
-import { notification } from 'antd';
+import { App } from 'antd';
 import { useAuth } from './AuthContext';
 import { useUserRole } from '../hooks/useUserRole';
 import { supabase } from '../lib/supabase';
@@ -109,6 +109,7 @@ const generateNotificationKey = (type, metadata = {}) => {
 export const NotificationProvider = ({ children }) => {
   const { currentUser } = useAuth();
   const { isAdmin, isSuperAdmin, userProfile } = useUserRole();
+  const { notification } = App.useApp();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [lastDailyDigest, setLastDailyDigest] = useState(null);
@@ -181,7 +182,7 @@ export const NotificationProvider = ({ children }) => {
 
     // Show Ant Design notification
     const notificationConfig = {
-      message: title,
+      title: title,
       description: message || description,
       duration: priority === NOTIFICATION_PRIORITY.ERROR ? 0 : 4.5, // Errors don't auto-dismiss
       placement: 'topRight',
