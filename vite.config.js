@@ -62,24 +62,22 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks: (id) => {
-            // Combine React and Ant Design to avoid version check issues
-            // Ant Design needs React to be available when it loads
+            // Combine React, Ant Design, and MUI to avoid initialization order issues
+            // Both Ant Design and MUI need React to be available when they load
             if (
               id.includes('node_modules/react') || 
               id.includes('node_modules/react-dom') || 
               id.includes('node_modules/react-router') ||
               id.includes('node_modules/antd') || 
-              id.includes('node_modules/@ant-design')
+              id.includes('node_modules/@ant-design') ||
+              id.includes('node_modules/@mui') ||
+              id.includes('node_modules/@emotion')
             ) {
               return 'react-antd-vendor';
             }
             // Supabase vendor chunk
             if (id.includes('node_modules/@supabase')) {
               return 'supabase-vendor';
-            }
-            // MUI Charts chunk
-            if (id.includes('node_modules/@mui')) {
-              return 'mui-vendor';
             }
             // Chart libraries
             if (id.includes('node_modules/chart.js') || id.includes('node_modules/recharts')) {

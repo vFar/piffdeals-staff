@@ -41,3 +41,4 @@ CREATE TRIGGER validate_invoice_item_quantity_trigger
 COMMENT ON FUNCTION validate_invoice_item_quantity() IS 'Validates invoice item quantity: must be <= 999 and <= stock_snapshot (if stock_snapshot is not null)';
 
 
+
