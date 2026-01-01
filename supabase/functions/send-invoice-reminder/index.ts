@@ -1,5 +1,6 @@
 // Send Invoice Reminder Email Edge Function
-// Sends reminder email to customers 2 days after invoice issue_date
+// Sends reminder email to customers on day 2 (1 day before due date)
+// Due date is 3 days from issue date, so reminder is sent on day 2
 // Only sends reminders for invoices that were actually sent to customers (sent_at IS NOT NULL)
 // Should be called daily via cron job
 
@@ -65,47 +66,48 @@ serve(async (req) => {
     const url = new URL(req.url);
     const testMode = url.searchParams.get('test') === 'true';
 
-    // Calculate 2 days ago from today
+    // Calculate tomorrow's date (1 day from today) - this is when reminders should be sent
+    // Reminder is sent on day 2 (1 day before due date, which is 3 days from issue date)
     const today = new Date();
-    const twoDaysAgo = new Date(today);
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    const twoDaysAgoStr = twoDaysAgo.toISOString().split('T')[0];
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
     const todayStr = today.toISOString().split('T')[0];
     
     // Find invoices that:
     // 1. Are in 'sent' or 'pending' status (not paid, cancelled, or draft)
-    // 2. Have an issue_date
+    // 2. Have a due_date
     // 3. Have a customer_email
     // 4. Have a public_token (needed for invoice link)
     // 5. Have sent_at NOT NULL (invoice was actually sent to customer via email)
-    // 6. Issue date is 2 days ago (or within test range in test mode)
+    // 6. Due date is tomorrow (1 day from now) - reminder sent on day 2
     // 7. Haven't had a reminder email sent yet (last_reminder_email_sent is null)
     let query = supabase
       .from('invoices')
       .select('id, invoice_number, customer_name, customer_email, issue_date, due_date, total, public_token, status, sent_at, last_reminder_email_sent')
       .in('status', ['sent', 'pending'])
-      .not('issue_date', 'is', null)
+      .not('due_date', 'is', null)
       .not('customer_email', 'is', null)
       .not('public_token', 'is', null)
       .not('sent_at', 'is', null) // IMPORTANT: Only invoices that were sent to customer
       .is('last_reminder_email_sent', null);
 
     if (testMode) {
-      // Test mode: check for invoices with issue_date 1-5 days ago (very flexible for testing)
-      const oneDayAgo = new Date(today);
-      oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-      const fiveDaysAgo = new Date(today);
-      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
-      const oneDayAgoStr = oneDayAgo.toISOString().split('T')[0];
-      const fiveDaysAgoStr = fiveDaysAgo.toISOString().split('T')[0];
+      // Test mode: check for invoices with due_date within 1-3 days from today (flexible for testing)
+      const threeDaysFromNow = new Date(today);
+      threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+      const oneDayFromNow = new Date(today);
+      oneDayFromNow.setDate(oneDayFromNow.getDate() + 1);
+      const threeDaysFromNowStr = threeDaysFromNow.toISOString().split('T')[0];
+      const oneDayFromNowStr = oneDayFromNow.toISOString().split('T')[0];
       
       query = query
-        .gte('issue_date', fiveDaysAgoStr) // issue_date >= 5 days ago
-        .lte('issue_date', oneDayAgoStr); // issue_date <= 1 day ago (so 1-5 days ago)
+        .gte('due_date', oneDayFromNowStr) // due_date >= tomorrow
+        .lte('due_date', threeDaysFromNowStr); // due_date <= 3 days from now
     } else {
-      // Production mode: check for invoices with issue_date 2 or more days ago (>= 2 days)
-      // This ensures reminders are sent if 2+ days have passed since invoice was created
-      query = query.lte('issue_date', twoDaysAgoStr); // issue_date <= 2 days ago
+      // Production mode: check for invoices with due_date = tomorrow (1 day from now)
+      // This sends reminder on day 2 (1 day before due date)
+      query = query.eq('due_date', tomorrowStr); // due_date = tomorrow
     }
 
     const { data: invoices, error: fetchError } = await query;
@@ -120,18 +122,18 @@ serve(async (req) => {
           success: true,
           reminders_sent: 0,
           message: testMode 
-            ? `No invoices found with issue_date 1-5 days ago that were sent to customers`
-            : `No invoices found with issue_date <= ${twoDaysAgoStr} (2+ days ago) that were sent to customers`,
+            ? `No invoices found with due_date 1-3 days from today that were sent to customers`
+            : `No invoices found with due_date = ${tomorrowStr} (tomorrow) that were sent to customers`,
           debug: testMode ? {
             test_mode: true,
             today: todayStr,
-            two_days_ago: twoDaysAgoStr,
-            checked_range: '1-5 days ago'
+            tomorrow: tomorrowStr,
+            checked_range: 'due_date 1-3 days from today'
           } : {
             test_mode: false,
             today: todayStr,
-            two_days_ago: twoDaysAgoStr,
-            checked_condition: `issue_date <= ${twoDaysAgoStr}`
+            tomorrow: tomorrowStr,
+            checked_condition: `due_date = ${tomorrowStr} (1 day before due date)`
           }
         }),
         {
@@ -486,7 +488,7 @@ www.piffdeals.lv
         debug: testMode ? {
           test_mode: true,
           today: todayStr,
-          two_days_ago: twoDaysAgoStr,
+          tomorrow: tomorrowStr,
           total_invoices_found: invoicesToRemind.length
         } : undefined
       }),
