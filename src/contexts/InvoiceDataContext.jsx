@@ -21,23 +21,30 @@ export const InvoiceDataProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [lastFetch, setLastFetch] = useState(null);
   const [error, setError] = useState(null);
+  const [totalCount, setTotalCount] = useState(0);
   
   // Cache duration: 60 seconds (stale-while-revalidate pattern) - increased for better performance
   const CACHE_DURATION = 60000;
   const isFetchingRef = { current: false };
 
   /**
-   * Fetch invoices from database
-   * @param {boolean} force - Force refresh even if cache is valid
+   * Fetch invoices from database with pagination
+   * @param {Object} options - Fetch options
+   * @param {boolean} options.force - Force refresh even if cache is valid
+   * @param {number} options.page - Page number (1-indexed)
+   * @param {number} options.pageSize - Number of items per page
+   * @param {string} options.searchText - Optional search text to filter by
    */
-  const fetchInvoices = useCallback(async (force = false) => {
+  const fetchInvoices = useCallback(async (options = {}) => {
+    const { 
+      force = false, 
+      page = 1, 
+      pageSize = 10, 
+      searchText = '' 
+    } = options;
+
     // Prevent duplicate fetches
     if (isFetchingRef.current) return;
-    
-    // Check cache validity (unless forced)
-    if (!force && lastFetch && Date.now() - lastFetch < CACHE_DURATION) {
-      return;
-    }
 
     // Must have user profile to fetch
     if (!userProfile?.id) return;
@@ -47,18 +54,32 @@ export const InvoiceDataProvider = ({ children }) => {
     setError(null);
 
     try {
-      // Build query based on role
+      // Build base query
       let query = supabase
         .from('invoices')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('*', { count: 'exact' }); // Include count for pagination
 
       // Employees can only see their own invoices
       if (!isAdmin && !isSuperAdmin) {
         query = query.eq('user_id', userProfile.id);
       }
 
-      const { data: invoicesData, error: invoicesError } = await query;
+      // Apply search filter if provided
+      if (searchText && searchText.trim()) {
+        const searchLower = searchText.toLowerCase().trim();
+        // Search in invoice_number, customer_name, and status
+        query = query.or(`invoice_number.ilike.%${searchLower}%,customer_name.ilike.%${searchLower}%,status.ilike.%${searchLower}%`);
+      }
+
+      // Order by created_at descending
+      query = query.order('created_at', { ascending: false });
+
+      // Apply pagination (Supabase uses range, which is 0-indexed)
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+      query = query.range(from, to);
+
+      const { data: invoicesData, error: invoicesError, count } = await query;
 
       if (invoicesError) throw invoicesError;
 
@@ -86,20 +107,35 @@ export const InvoiceDataProvider = ({ children }) => {
       })) || [];
 
       setInvoices(enrichedInvoices);
+      setTotalCount(count || 0);
       setLastFetch(Date.now());
+      
+      // Return pagination metadata
+      return {
+        data: enrichedInvoices,
+        total: count || 0,
+        page,
+        pageSize,
+      };
     } catch (err) {
       setError(err.message || 'Failed to fetch invoices');
+      return {
+        data: [],
+        total: 0,
+        page,
+        pageSize,
+      };
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
     }
-  }, [userProfile, isAdmin, isSuperAdmin, lastFetch]);
+  }, [userProfile, isAdmin, isSuperAdmin]);
 
   /**
-   * Refresh invoices (force fetch)
+   * Refresh invoices (force fetch with current pagination)
    */
-  const refreshInvoices = useCallback(() => {
-    return fetchInvoices(true);
+  const refreshInvoices = useCallback(async (page = 1, pageSize = 10, searchText = '') => {
+    return fetchInvoices({ force: true, page, pageSize, searchText });
   }, [fetchInvoices]);
 
   /**
@@ -137,12 +173,8 @@ export const InvoiceDataProvider = ({ children }) => {
     return invoices.find(inv => inv.invoice_number === invoiceNumber);
   }, [invoices]);
 
-  // Initial fetch when user profile is available
-  useEffect(() => {
-    if (userProfile?.id && !lastFetch) {
-      fetchInvoices();
-    }
-  }, [userProfile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Note: Initial fetch should be done by consuming components with pagination params
+  // This allows components to control their own pagination state
 
   const value = useMemo(() => ({
     // Data
@@ -150,18 +182,19 @@ export const InvoiceDataProvider = ({ children }) => {
     loading,
     error,
     lastFetch,
+    totalCount, // Total count for pagination
     
     // Actions
-    fetchInvoices,
+    fetchInvoices, // Now accepts options: { page, pageSize, searchText, force }
     refreshInvoices,
     
-    // Helpers
+    // Helpers (Note: These work on current page only, consider deprecating or adjusting)
     getInvoicesByStatus,
     getPaidInvoices,
     getUnpaidInvoices,
     getInvoiceById,
     getInvoiceByNumber,
-  }), [invoices, loading, error, lastFetch, fetchInvoices, refreshInvoices, getInvoicesByStatus, getPaidInvoices, getUnpaidInvoices, getInvoiceById, getInvoiceByNumber]);
+  }), [invoices, loading, error, lastFetch, totalCount, fetchInvoices, refreshInvoices, getInvoicesByStatus, getPaidInvoices, getUnpaidInvoices, getInvoiceById, getInvoiceByNumber]);
 
   return (
     <InvoiceDataContext.Provider value={value}>

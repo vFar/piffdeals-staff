@@ -4,6 +4,7 @@ import { Form, Input, Button, Checkbox, Card, App } from 'antd';
 import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { getUserFriendlyError, logError } from '../utils/errorHandler';
 
 const Login = () => {
   const [loading, setLoading] = useState(false);
@@ -196,26 +197,16 @@ const Login = () => {
         return;
       }
       
-      let errorMessage = 'Nepareizs e-pasts vai parole!';
-      const errorMsg = error?.message || '';
-      const errorCode = error?.status || error?.code || '';
+      // Log error to console (for debugging)
+      logError(error, 'Login');
       
-      // Handle authentication errors
-      if (errorMsg === 'Invalid login credentials' || errorMsg.includes('Invalid login credentials')) {
-        errorMessage = 'Nepareizs e-pasts vai parole!';
-      } else if (errorCode === 429 || errorMsg.includes('too_many_requests') || errorMsg.includes('Too many requests')) {
-        errorMessage = 'Pārāk daudz mēģinājumu. Lūdzu, mēģiniet vēlāk!';
-      } else if (errorMsg.includes('email_not_confirmed') || errorMsg.includes('Email not confirmed')) {
-        errorMessage = 'Lūdzu, apstipriniet savu e-pastu';
-      } else if (errorMsg.includes('User is banned') || errorMsg.includes('banned')) {
-        errorMessage = 'Konts bloķēts. Sazinies ar priekšniecību!';
-      } else if (errorMsg.includes('Email') && !errorMsg.includes('Invalid')) {
-        errorMessage = 'Nepareizs e-pasta formāts';
-      } else if (errorMsg.includes('network') || errorMsg.includes('Network')) {
-        errorMessage = 'Tīkla kļūda. Lūdzu, pārbaudiet interneta savienojumu!';
-      }
+      // Get user-friendly error message (hides backend errors in production)
+      const errorMessage = getUserFriendlyError(
+        error,
+        'Neizdevās pieslēgties. Pārbaudiet e-pastu un paroli un mēģiniet vēlāk.'
+      );
       
-      // Always show error message
+      // Show user-friendly error message
       message.error(errorMessage, 5);
     } finally {
       setLoading(false);

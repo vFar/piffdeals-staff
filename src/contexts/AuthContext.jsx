@@ -168,7 +168,19 @@ export const AuthProvider = ({ children }) => {
 
     // Handle other errors
     if (!response.ok || !result.success) {
-      const error = new Error(result.error || 'Login failed');
+      // Log full error to console (for debugging)
+      console.error('[Login Error]', {
+        status: response.status,
+        error: result.error,
+        fullResponse: result
+      });
+
+      // Use generic error message in production, specific message in development
+      const errorMessage = import.meta.env.PROD
+        ? 'Neizdevās pieslēgties. Pārbaudiet e-pastu un paroli.'
+        : (result.error || 'Login failed');
+      
+      const error = new Error(errorMessage);
       error.status = response.status;
       throw error;
     }

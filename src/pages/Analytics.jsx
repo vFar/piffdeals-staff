@@ -42,13 +42,20 @@ const Analytics = () => {
         const userId = userProfile.id;
         const isAdminUser = isAdmin || isSuperAdmin;
 
-        let invoiceQuery = supabase.from('invoices').select('*');
+        let invoiceQuery = supabase
+          .from('invoices')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
         if (!isAdminUser) {
           invoiceQuery = invoiceQuery.eq('user_id', userId);
         }
 
         const { data: invoices, error } = await invoiceQuery;
-        if (error) throw error;
+        if (error) {
+          console.error('Error fetching invoices:', error);
+          throw error;
+        }
 
         const paidInvoices = invoices?.filter(inv => inv.status === 'paid') || [];
 
@@ -108,7 +115,11 @@ const Analytics = () => {
           topProducts,
         });
       } catch (error) {
-        // Error fetching analytics data
+        console.error('Error fetching analytics data:', error);
+        setAnalyticsData({
+          revenueData: [],
+          topProducts: [],
+        });
       } finally {
         setLoading(false);
       }

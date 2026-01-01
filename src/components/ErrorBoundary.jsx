@@ -1,6 +1,10 @@
 import React from 'react';
 import { Result, Button } from 'antd';
-import { HomeOutlined, ReloadOutlined } from '@ant-design/icons';
+import { HomeOutlined, ReloadOutlined, MailOutlined } from '@ant-design/icons';
+import { DEVELOPER_CONTACT } from '../utils/errorHandler';
+
+const isProduction = import.meta.env.PROD;
+const isDevelopment = import.meta.env.DEV;
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -20,8 +24,14 @@ class ErrorBoundary extends React.Component {
       errorInfo
     });
 
-    // You can also log the error to an error reporting service here
+    // Log error to console (always, for debugging)
+    console.error('ErrorBoundary caught an error:', error, errorInfo);
+
+    // In production, you can also log the error to an error reporting service here
     // e.g., Sentry, LogRocket, etc.
+    // if (isProduction) {
+    //   Sentry.captureException(error, { contexts: { react: { componentStack: errorInfo.componentStack } } });
+    // }
   }
 
   handleReset = () => {
@@ -37,7 +47,56 @@ class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
-      // Custom fallback UI
+      // In production: Show simple, user-friendly error page (NO technical details)
+      // In development: Show error details for debugging
+      
+      if (isProduction) {
+        // Production: Simple error page with NO technical information
+        return (
+          <div style={{
+            minHeight: '100vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#EBF3FF',
+            padding: '20px'
+          }}>
+            <Result
+              status="error"
+              title="Kaut kas nogāja greizi"
+              subTitle="Radās neparedzēta kļūda. Lūdzu, mēģiniet atjaunot lapu vai doties uz sākumlapu. Ja kļūda atkārtojas, lūdzu, sazinieties ar izstrādātāju."
+              extra={[
+                <Button
+                  type="primary"
+                  key="reload"
+                  icon={<ReloadOutlined />}
+                  onClick={this.handleReset}
+                  style={{ marginRight: 8 }}
+                >
+                  Atjaunot lapu
+                </Button>,
+                <Button
+                  key="home"
+                  icon={<HomeOutlined />}
+                  onClick={this.handleGoHome}
+                  style={{ marginRight: 8 }}
+                >
+                  Sākumlapa
+                </Button>,
+                <Button
+                  key="contact"
+                  icon={<MailOutlined />}
+                  onClick={() => window.location.href = `mailto:${DEVELOPER_CONTACT.email}?subject=Application Error&body=Please describe the error you encountered.`}
+                >
+                  Sazināties ar izstrādātāju
+                </Button>
+              ]}
+            />
+          </div>
+        );
+      }
+
+      // Development: Show error details for debugging
       return (
         <div style={{
           minHeight: '100vh',
@@ -70,7 +129,8 @@ class ErrorBoundary extends React.Component {
               </Button>
             ]}
           >
-            {process.env.NODE_ENV === 'development' && this.state.error && (
+            {/* Only show error details in development */}
+            {this.state.error && (
               <div style={{
                 marginTop: 24,
                 padding: 16,
@@ -79,7 +139,7 @@ class ErrorBoundary extends React.Component {
                 maxWidth: 800,
                 textAlign: 'left'
               }}>
-                <details>
+                <details open>
                   <summary style={{ cursor: 'pointer', fontWeight: 600, marginBottom: 8 }}>
                     Tehniskā informācija (tikai izstrādes režīmā)
                   </summary>

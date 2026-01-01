@@ -6,13 +6,14 @@ import {
 } from '@mui/x-charts';
 import DashboardLayout from '../components/DashboardLayout';
 import { useUserRole } from '../hooks/useUserRole';
-import { useInvoiceData } from '../contexts/InvoiceDataContext';
+import { supabase } from '../lib/supabase';
 
 const { Title, Text } = Typography;
 
 const SalesAnalytics = () => {
   const { userProfile, isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
-  const { invoices, loading: invoicesLoading, getPaidInvoices } = useInvoiceData();
+  const [invoices, setInvoices] = useState([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(true);
   
   const [analyticsData, setAnalyticsData] = useState({
     monthlySalesData: [],
@@ -24,6 +25,38 @@ const SalesAnalytics = () => {
   useEffect(() => {
     document.title = 'Pārdošanas analītika | Piffdeals';
   }, []);
+
+  // Fetch all invoices for analytics
+  useEffect(() => {
+    if (roleLoading || !userProfile) return;
+
+    const fetchAllInvoices = async () => {
+      try {
+        setInvoicesLoading(true);
+        let query = supabase
+          .from('invoices')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        // Employees can only see their own invoices
+        if (!isAdmin && !isSuperAdmin) {
+          query = query.eq('user_id', userProfile.id);
+        }
+
+        const { data: invoicesData, error: invoicesError } = await query;
+        if (invoicesError) throw invoicesError;
+
+        setInvoices(invoicesData || []);
+      } catch (error) {
+        console.error('Error fetching invoices:', error);
+        setInvoices([]);
+      } finally {
+        setInvoicesLoading(false);
+      }
+    };
+
+    fetchAllInvoices();
+  }, [userProfile, isAdmin, isSuperAdmin, roleLoading]);
 
   // Calculate analytics data from shared invoice context
   const calculateAnalyticsData = useCallback(() => {

@@ -1085,7 +1085,7 @@ const DashboardLayout = ({ children }) => {
         }}
         open={mobileMenuOpen}
         styles={{ body: { padding: 0 } }}
-        width={280}
+        size={280}
         style={{ zIndex: 1001 }}
         closable={false}
       >

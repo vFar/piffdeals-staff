@@ -5,7 +5,7 @@ import { LineChart, BarChart, PieChart } from '@mui/x-charts';
 import DashboardLayout from '../components/DashboardLayout';
 import { useAuth } from '../contexts/AuthContext';
 import { useUserRole } from '../hooks/useUserRole';
-import { useInvoiceData } from '../contexts/InvoiceDataContext';
+import { supabase } from '../lib/supabase';
 
 const { Text, Title } = Typography;
 
@@ -67,7 +67,8 @@ const StatCard = memo(({ icon, title, value, change, iconBg = '#EBF3FF', iconCol
 const Dashboard = () => {
   const { userProfile: authProfile, currentUser, loading: authLoading } = useAuth();
   const { userProfile, isAdmin, isSuperAdmin, loading: roleLoading } = useUserRole();
-  const { invoices, loading: invoicesLoading, getPaidInvoices } = useInvoiceData();
+  const [invoices, setInvoices] = useState([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(true);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   
   const [dashboardData, setDashboardData] = useState({
@@ -124,6 +125,38 @@ const Dashboard = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Fetch all invoices for dashboard statistics
+  useEffect(() => {
+    if (roleLoading || !userProfile) return;
+
+    const fetchAllInvoices = async () => {
+      try {
+        setInvoicesLoading(true);
+        let query = supabase
+          .from('invoices')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        // Employees can only see their own invoices
+        if (!isAdmin && !isSuperAdmin) {
+          query = query.eq('user_id', userProfile.id);
+        }
+
+        const { data: invoicesData, error: invoicesError } = await query;
+        if (invoicesError) throw invoicesError;
+
+        setInvoices(invoicesData || []);
+      } catch (error) {
+        console.error('Error fetching invoices:', error);
+        setInvoices([]);
+      } finally {
+        setInvoicesLoading(false);
+      }
+    };
+
+    fetchAllInvoices();
+  }, [userProfile, isAdmin, isSuperAdmin, roleLoading]);
 
   // Calculate dashboard data from shared invoice context
   const calculateDashboardData = useCallback(() => {

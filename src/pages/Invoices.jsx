@@ -22,6 +22,7 @@ const Invoices = () => {
   const [searchText, setSearchText] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
   const [paymentLinkModal, setPaymentLinkModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [shareMethodModal, setShareMethodModal] = useState(false);
@@ -36,13 +37,110 @@ const Invoices = () => {
     document.title = 'Rēķini | Piffdeals';
   }, []);
 
+  // Define fetchInvoices BEFORE useEffects that use it
+  const fetchInvoices = useCallback(async () => {
+    try {
+      // Only show spinner on initial load, not on refreshes
+      if (initialLoad) {
+        setLoading(true);
+      }
+      
+      // Build query with pagination and search
+      let query = supabase
+        .from('invoices')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false });
+
+      // Employees can only see their own invoices
+      if (!isAdmin && !isSuperAdmin) {
+        query = query.eq('user_id', userProfile?.id);
+      }
+
+      // Apply search filter if provided
+      if (searchText && searchText.trim()) {
+        const searchLower = searchText.toLowerCase().trim();
+        // Map Latvian status names to English for search
+        const statusMap = {
+          'melnraksts': 'draft',
+          'nosūtīts': 'sent',
+          'apmaksāts': 'paid',
+          'gaida': 'pending',
+          'kavēts': 'overdue',
+          'atcelts': 'cancelled',
+        };
+        const mappedStatus = statusMap[searchLower];
+        
+        if (mappedStatus) {
+          // If search matches a Latvian status, search for English status
+          query = query.or(`invoice_number.ilike.%${searchLower}%,customer_name.ilike.%${searchLower}%,status.eq.${mappedStatus}`);
+        } else {
+          query = query.or(`invoice_number.ilike.%${searchLower}%,customer_name.ilike.%${searchLower}%,status.ilike.%${searchLower}%`);
+        }
+      }
+
+      // Apply pagination (Supabase uses range, which is 0-indexed)
+      const from = (currentPage - 1) * pageSize;
+      const to = from + pageSize - 1;
+      query = query.range(from, to);
+
+      const { data: invoicesData, error: invoicesError, count } = await query;
+
+      if (invoicesError) throw invoicesError;
+
+      // Fetch all unique user profiles for the creators
+      const uniqueUserIds = [...new Set(invoicesData?.map(inv => inv.user_id).filter(Boolean))];
+      
+      let userProfilesMap = {};
+      if (uniqueUserIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from('user_profiles')
+          .select('id, username, email, role')
+          .in('id', uniqueUserIds);
+
+        if (!usersError && usersData) {
+          usersData.forEach(user => {
+            userProfilesMap[user.id] = user;
+          });
+        }
+      }
+
+      // Enrich invoices with creator information
+      const enrichedInvoices = invoicesData?.map(invoice => ({
+        ...invoice,
+        creator: userProfilesMap[invoice.user_id] || null,
+      })) || [];
+
+      setInvoices(enrichedInvoices);
+      setFilteredInvoices(enrichedInvoices);
+      setTotalCount(count || 0);
+    } catch (error) {
+      message.error('Neizdevās ielādēt rēķinus');
+    } finally {
+      if (initialLoad) {
+        setLoading(false);
+        setInitialLoad(false); // Mark initial load as complete
+      }
+    }
+  }, [userProfile, isAdmin, isSuperAdmin, currentPage, pageSize, searchText, initialLoad]);
+
+  // Reset to page 1 when search changes
   useEffect(() => {
-    // Only fetch invoices when userProfile is loaded
+    if (searchText !== undefined) {
+      setCurrentPage(1);
+    }
+  }, [searchText]);
+
+  // Fetch invoices when userProfile, page, pageSize, or searchText changes
+  useEffect(() => {
     if (userProfile) {
       fetchInvoices();
     }
+  }, [userProfile, currentPage, pageSize, searchText, fetchInvoices]);
+
+  // Subscribe to real-time updates
+  useEffect(() => {
+    if (!userProfile) return;
     
-    // Subscribe to real-time updates
     const subscription = supabase
       .channel('invoice-updates')
       .on(
@@ -55,7 +153,7 @@ const Invoices = () => {
         (payload) => {
           if (payload.new.status === 'paid') {
             message.success(`Rēķins ${payload.new.invoice_number} ir apmaksāts!`);
-            fetchInvoices();
+            fetchInvoices(); // Refetch current page
           }
         }
       )
@@ -64,41 +162,7 @@ const Invoices = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [userProfile]);
-
-  useEffect(() => {
-    if (!searchText.trim()) {
-      setFilteredInvoices(invoices);
-      setCurrentPage(1);
-      return;
-    }
-
-    // Status mapping: English (database) -> Latvian (display)
-    const statusLabels = {
-      draft: 'melnraksts',
-      sent: 'nosūtīts',
-      paid: 'apmaksāts',
-      pending: 'gaida',
-      overdue: 'kavēts',
-      cancelled: 'atcelts',
-    };
-
-    const lowerSearch = searchText.toLowerCase();
-    const filtered = invoices.filter((invoice) => {
-      const invoiceNumber = (invoice.invoice_number || '').toLowerCase();
-      const customerName = (invoice.customer_name || '').toLowerCase();
-      const status = (invoice.status || '').toLowerCase();
-      const statusLabel = statusLabels[invoice.status] || '';
-      
-      return invoiceNumber.includes(lowerSearch) || 
-             customerName.includes(lowerSearch) || 
-             status.includes(lowerSearch) ||
-             statusLabel.includes(lowerSearch);
-    });
-
-      setFilteredInvoices(filtered);
-    setCurrentPage(1);
-  }, [searchText, invoices]);
+  }, [userProfile, fetchInvoices]);
 
   // Preserve selectedInvoice when invoices list updates (e.g., after fetchInvoices)
   // This keeps the modal open even when invoices are refreshed
@@ -147,63 +211,6 @@ const Invoices = () => {
       return () => clearInterval(timer);
     }
   }, [emailCooldown]);
-
-  const fetchInvoices = async () => {
-    try {
-      // Only show spinner on initial load, not on refreshes
-      if (initialLoad) {
-        setLoading(true);
-      }
-      
-      // Fetch invoices
-      let query = supabase
-        .from('invoices')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      // Employees can only see their own invoices
-      if (!isAdmin && !isSuperAdmin) {
-        query = query.eq('user_id', userProfile?.id);
-      }
-
-      const { data: invoicesData, error: invoicesError } = await query;
-
-      if (invoicesError) throw invoicesError;
-
-      // Fetch all unique user profiles for the creators
-      const uniqueUserIds = [...new Set(invoicesData?.map(inv => inv.user_id).filter(Boolean))];
-      
-      let userProfilesMap = {};
-      if (uniqueUserIds.length > 0) {
-        const { data: usersData, error: usersError } = await supabase
-          .from('user_profiles')
-          .select('id, username, email, role')
-          .in('id', uniqueUserIds);
-
-        if (!usersError && usersData) {
-          usersData.forEach(user => {
-            userProfilesMap[user.id] = user;
-          });
-        }
-      }
-
-      // Enrich invoices with creator information
-      const enrichedInvoices = invoicesData?.map(invoice => ({
-        ...invoice,
-        creator: userProfilesMap[invoice.user_id] || null,
-      })) || [];
-
-      setInvoices(enrichedInvoices);
-      setFilteredInvoices(enrichedInvoices);
-    } catch (error) {
-      message.error('Neizdevās ielādēt rēķinus');
-    } finally {
-      if (initialLoad) {
-        setLoading(false);
-        setInitialLoad(false); // Mark initial load as complete
-      }
-    }
-  };
 
   const handleViewPaymentLink = (invoice) => {
     setSelectedInvoice(invoice);
@@ -1351,9 +1358,7 @@ const Invoices = () => {
               <div style={{ overflowX: 'auto' }}>
                 <Table
                   columns={columns}
-                  dataSource={filteredInvoices
-                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
-                    .map((invoice) => ({ ...invoice, key: invoice.id }))}
+                  dataSource={filteredInvoices.map((invoice) => ({ ...invoice, key: invoice.id }))}
                   pagination={false}
                   className="custom-table"
                   rowClassName={(record) => {
@@ -1362,10 +1367,10 @@ const Invoices = () => {
                   }}
                 />
               </div>
-              {filteredInvoices.length > 0 && (
+              {totalCount > 0 && (
                 <Pagination
                   current={currentPage}
-                  total={filteredInvoices.length}
+                  total={totalCount}
                   pageSize={pageSize}
                   pageSizeOptions={['10', '25', '50', '100']}
                   onChange={(page, size) => {
